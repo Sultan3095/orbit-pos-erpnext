@@ -55,6 +55,7 @@ jobs:
           bench --site test_site execute orbit_pos.tests.ci_seed.run
           sed -i '/redis/d;/watch/d;/socketio/d' Procfile
           bench build > /tmp/build.log 2>&1 || tail -20 /tmp/build.log
+          bench use test_site
           (bench start > /tmp/bench-start.log 2>&1 &)
           for i in $(seq 1 60); do curl -sf localhost:8000/api/method/ping && break; sleep 3; done
           pip install playwright && playwright install --with-deps chromium
