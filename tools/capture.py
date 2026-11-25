@@ -31,7 +31,12 @@ with sync_playwright() as p:
     b = p.chromium.launch()
     ctx = b.new_context(viewport={"width": 1366, "height": 820}, record_video_dir=OUT + "/video", record_video_size={"width": 1366, "height": 820})
     page = ctx.new_page(); page.set_default_timeout(20000)
-    page.on("response", lambda r: log.append(("api", r.status, r.url.split("orbit_pos.api.")[-1][:60], "")) if "orbit_pos.api." in r.url and r.status >= 400 else None)
+    def _on_resp(r):
+        if "orbit_pos.api." in r.url and r.status >= 400:
+            try: body = r.text()[:300]
+            except Exception: body = ""
+            log.append(("api", r.status, r.url.split("orbit_pos.api.")[-1][:60], body))
+    page.on("response", _on_resp)
     go(page, "/login")
     shot(page, "login", "Orbit POS على ERPNext: تسجيل الدخول")
     page.fill("#login_email", "Administrator"); page.fill("#login_password", "admin"); page.click(".btn-login")

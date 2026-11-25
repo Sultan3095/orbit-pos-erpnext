@@ -2,3 +2,6 @@ POS Shift,وردية نقطة البيع
 POS Promotion,عرض
 POS Cash Movement,حركة نقدية
 Orbit POS Settings,إعدادات أوربت
+Buy Qty (paid units per group),اشتري (كمية)
+Get Qty (units per group, free by default),احصل مجانًا على (كمية)
+Get Discount Percent (100 = free),خصم على قطع "احصل" % (100 = مجانًا)

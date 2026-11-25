@@ -63,17 +63,18 @@
   {
    "fieldname": "buy_qty",
    "fieldtype": "Int",
-   "label": "Buy Qty"
+   "label": "Buy Qty (paid units per group)"
   },
   {
    "fieldname": "get_qty",
    "fieldtype": "Int",
-   "label": "Get Qty"
+   "label": "Get Qty (units per group, free by default)",
+   "description": "Buy 2 Get 3 = in every group of 5 units, the cheapest 3 are free"
   },
   {
    "fieldname": "get_discount_percent",
    "fieldtype": "Percent",
-   "label": "Get Discount Percent",
+   "label": "Get Discount Percent (100 = free)",
    "default": "100"
   },
   {

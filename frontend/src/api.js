@@ -1,6 +1,11 @@
 // Calls Frappe whitelisted methods. With ?mock=1 an in-memory mock runs the same contract (used for UI tests).
 const M = 'orbit_pos.api.';
-let csrf = () => (window.frappe && window.frappe.csrf_token) || (document.cookie.match(/csrf_token=([^;]+)/) || [])[1] || '';
+// The POS page runs inside an iframe on the ERPNext desk: the CSRF token lives on the parent window, not in this frame.
+let csrf = () => {
+  try { if (window.frappe && window.frappe.csrf_token) return window.frappe.csrf_token; } catch (e) {}
+  try { if (window.parent && window.parent.frappe && window.parent.frappe.csrf_token) return window.parent.frappe.csrf_token; } catch (e) {}
+  return (document.cookie.match(/csrf_token=([^;]+)/) || [])[1] || '';
+};
 
 async function real(method, args) {
   const res = await fetch('/api/method/' + M + method, {

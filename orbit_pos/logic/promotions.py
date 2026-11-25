@@ -44,7 +44,8 @@ def _in_scope(p: dict, line: dict) -> bool:
     if t == "item":
         return line.get("itemId") == s.get("value")
     if t == "group":
-        return (line.get("group") or "") == s.get("value")
+        groups = s.get("groups") or [s.get("value")]     # "groups" = the chosen group plus all its sub-groups
+        return (line.get("group") or "") in groups
     return False
 
 

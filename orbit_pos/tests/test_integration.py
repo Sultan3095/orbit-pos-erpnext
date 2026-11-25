@@ -15,6 +15,27 @@ class TestOrbitPOS(Base):
         r = apply_promotions([{"itemId": "x", "qty": 5, "price": 4}], [promo.to_engine()])
         self.assertEqual(r["subtotal"], 8.0)
 
+    def test_promotion_scope_required(self):
+        with self.assertRaises(frappe.ValidationError):
+            frappe.get_doc({"doctype": "POS Promotion", "promo_name": "no item", "promo_type": "percent", "percent": 10,
+                            "scope_type": "Item"}).insert()
+        with self.assertRaises(frappe.ValidationError):
+            frappe.get_doc({"doctype": "POS Promotion", "promo_name": "no group", "promo_type": "percent", "percent": 10,
+                            "scope_type": "Item Group"}).insert()
+
+    def test_promotion_on_parent_group_covers_sub_groups(self):
+        for name, parent, is_group in (("Orbit Promo Parent", "All Item Groups", 1), ("Orbit Promo Child", "Orbit Promo Parent", 0)):
+            if not frappe.db.exists("Item Group", name):
+                frappe.get_doc({"doctype": "Item Group", "item_group_name": name, "parent_item_group": parent, "is_group": is_group}).insert()
+        promo = frappe.get_doc({"doctype": "POS Promotion", "promo_name": "parent group 10%", "promo_type": "percent", "percent": 10,
+                                "scope_type": "Item Group", "scope_item_group": "Orbit Promo Parent"}).insert()
+        from orbit_pos.logic.promotions import apply_promotions
+        lines = [{"itemId": "a", "group": "Orbit Promo Child", "qty": 1, "price": 100},
+                 {"itemId": "b", "group": "Some Other Group", "qty": 1, "price": 100}]
+        r = apply_promotions(lines, [promo.to_engine()])
+        self.assertEqual(r["lines"][0]["promoDisc"], 10.0)    # sub-group is covered
+        self.assertEqual(r["lines"][1]["promoDisc"], 0)       # unrelated group is not
+
     def test_settings_defaults(self):
         s = frappe.get_single("Orbit POS Settings")
         self.assertEqual(int(s.return_window_days), 14)
