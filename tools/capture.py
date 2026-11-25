@@ -47,7 +47,8 @@ with sync_playwright() as p:
         fr.locator("input").first.fill("100")
         cap(page, "فتح الشيفت برصيد افتتاحي 100")
         shot(page, "pos-open-shift", None, 500)
-        fr.get_by_test_id("open").click(); time.sleep(2)
+        fr.get_by_test_id("open").click(); time.sleep(3)
+        log.append(("after-open-text", fr.locator("body").inner_text()[:400]))
         cap(page, "الباركود أو الكود، وممكن تكتب 5*6221 لخمس وحدات")
         shot(page, "pos-ready")
         for code in ["5*6221", "6222", "6223"]:
