@@ -47,7 +47,7 @@ export default function Receipt({ data, onClose }) {
         {d.discount ? <div className="r-row"><span>{B('خصم', 'Discount')}</span><span>{fmt(d.discount)}</span></div> : null}
         {d.taxes.map((t, i) => <div className="r-row" key={i}><span>{t.name}</span><span>{fmt(t.amount)}</span></div>)}
         <div className="r-row r-total"><span>{d.is_return ? B('إجمالي المرتجع', 'Return total') : B('الإجمالي', 'Total')}</span><b>{fmt(Math.abs(d.grand_total))}</b></div>
-        {d.payments.map((p, i) => <div className="r-row" key={i}><span>{p.method}</span><span>{fmt(Math.abs(p.amount))}</span></div>)}
+        {d.payments.map((p, i) => <div className="r-row" key={i}><span>{p.method}</span><span>{fmt(Math.abs(p.amount))}</span>{p.ref ? <span> #{p.ref}</span> : null}</div>)}
         {d.exchange_credit_used ? <div className="r-row"><span>{B('رصيد استبدال مستخدم', 'Exchange credit used')} {d.exchange_credit_used.name}</span><span>{fmt(d.exchange_credit_used.amount)}</span></div> : null}
         {ex ? (
           <div className="r-box" data-testid="r-exchange">

@@ -4,6 +4,8 @@ import { api } from './api.js';
 import { createQueue, newTxnId } from './queue.js';
 import Receipt from './Receipt.jsx';
 import Returns from './Returns.jsx';
+import Approvals from './Approvals.jsx';
+import EditInvoice from './EditInvoice.jsx';
 
 const queue = createQueue(window.localStorage);
 const TERMINAL = localStorage.getItem('orbit_terminal') || (localStorage.setItem('orbit_terminal', 'T' + Math.random().toString(36).slice(2, 6)), localStorage.getItem('orbit_terminal'));
@@ -14,12 +16,14 @@ export default function App() {
   const [lang, setLang] = useState(localStorage.getItem('orbit_lang') || 'ar');
   const [theme, setTheme] = useState(localStorage.getItem('orbit_theme') || 'light');
   const [shift, setShift] = useState(null);
+  const [perms, setPerms] = useState({});
   const [cart, setCart] = useState([]);
   const [quote, setQuote] = useState(null);
   const [code, setCode] = useState('');
   const [msg, setMsg] = useState('');
   const [cashPaid, setCashPaid] = useState('');
   const [cardPaid, setCardPaid] = useState('');
+  const [cardRef, setCardRef] = useState('');
   const [opening, setOpening] = useState('0');
   const [counted, setCounted] = useState('');
   const [z, setZ] = useState(null);
@@ -44,6 +48,7 @@ export default function App() {
     localStorage.setItem('orbit_lang', lang); localStorage.setItem('orbit_theme', theme);
   }, [lang, theme]);
 
+  useEffect(() => { api('shift.my_permissions').then((r) => setPerms(r.perms || {})).catch(() => setPerms({})); }, []);
   const refreshShift = useCallback(async () => { try { setShift(await api('shift.current_shift')); setOnline(true); } catch (e) { setOnline(false); } }, []);
   useEffect(() => { refreshShift(); }, [refreshShift]);
   useEffect(() => { if (shift) api('exchange.active_promotions').then(setPromos).catch(() => setPromos([])); }, [shift]);
@@ -122,13 +127,13 @@ export default function App() {
     const cash = Number(cashPaid) || 0, card = Number(cardPaid) || 0;
     const payments = [];
     if (cash) payments.push({ method: 'Cash', amount: cash });
-    if (card) payments.push({ method: 'Credit Card', amount: card });
+    if (card) payments.push({ method: 'Credit Card', amount: card, ref: cardRef });
     const payload = { txn_id: newTxnId(TERMINAL, counter.current), terminal: TERMINAL, shift: shift.name,
       lines: cart.map((l) => ({ itemId: l.itemId, group: l.group, qty: l.qty, price: l.price, ...(l.hasSerial ? { serial_no: serialList(l) } : {}) })), payments };
     if (customer) payload.customer = customer.name;
     if (xr) payload.exchange_receipt = xr.name;
     queue.push(payload); setPending(queue.list().length);       // always queue first, so nothing is lost
-    setCart([]); setCashPaid(''); setCardPaid(''); setXr(null); setCustomer(null); setMsg(L('done') + (change ? ` — ${L('change')}: ${fmt(change)}` : ''));
+    setCart([]); setCashPaid(''); setCardPaid(''); setCardRef(''); setXr(null); setCustomer(null); setMsg(L('done') + (change ? ` — ${L('change')}: ${fmt(change)}` : ''));
     await flush();
     const res = lastResult[payload.txn_id];
     if (res && res.sales_invoice) { try { setRc(await api('exchange.get_receipt', { invoice: res.sales_invoice })); } catch (e) {} }
@@ -149,7 +154,7 @@ export default function App() {
       setCm({ ...cm, needPin: cm.needPin || needs, err: e.message });
     }
   }
-  async function closeShift() { try { setZ(await api('shift.close_shift', { shift: shift.name, counted_cash: counted })); setShift(null); } catch (e) { setMsg(e.message); } }
+  async function closeShift() { try { const r = await api('shift.close_shift', { shift: shift.name, counted_cash: counted }); if (r.pending) { setZ(null); setMsg(L('closePending')); } else setZ(r); setShift(null); } catch (e) { setMsg(e.message); } }
 
   return (
     <div className="app">
@@ -161,6 +166,8 @@ export default function App() {
         <span className="tabs">
           <button className={view === 'sale' ? 'on' : ''} onClick={() => setView('sale')} data-testid="tab-sale">{L('tabSale')}</button>
           <button className={view === 'returns' ? 'on' : ''} onClick={() => setView('returns')} data-testid="tab-returns">{L('tabReturns')}</button>
+          {(perms.editInvoice === 'Y' || perms.voidInvoice === 'Y' || perms.editInvoice === 'A') && <button className={view === 'edit' ? 'on' : ''} onClick={() => setView('edit')} data-testid="tab-edit">{L('tabEdit')}</button>}
+          {perms.approve === 'Y' && perms.seeExpected === 'Y' && <button className={view === 'approvals' ? 'on' : ''} onClick={() => setView('approvals')} data-testid="tab-approvals">{L('tabApprovals')}</button>}
         </span>
         <span className="sp" />
         <label>{L('theme')} <select value={theme} onChange={(e) => setTheme(e.target.value)} data-testid="theme">
@@ -175,7 +182,14 @@ export default function App() {
           <label>{L('openingCash')} <input value={opening} onChange={(e) => setOpening(e.target.value)} inputMode="decimal" /></label>
           <button className="primary" onClick={openShift} data-testid="open">{L('openShift')}</button>
           {z && <pre data-testid="z">{L('expected')}: {fmt(z.expected_cash)} / {L('countedCash')}: {fmt(z.counted_cash)} / {L('difference')}: {fmt(z.difference)}</pre>}
+          {msg && <div className="msg" data-testid="close-pending-msg">{msg}</div>}
+          {perms.approve === 'Y' && perms.seeExpected === 'Y' && <Approvals L={L} fmt={fmt} />}
+          {(perms.editInvoice === 'Y' || perms.voidInvoice === 'Y') && <EditInvoice L={L} fmt={fmt} perms={perms} onReceipt={setRc} />}
         </section>
+      ) : view === 'edit' ? (
+        <EditInvoice L={L} fmt={fmt} perms={perms} onReceipt={setRc} />
+      ) : view === 'approvals' ? (
+        <Approvals L={L} fmt={fmt} />
       ) : view === 'returns' ? (
         <Returns L={L} branch={shift.branch} onReceipt={setRc} onExchange={(name) => { setView('sale'); applyReceipt(name); }} />
       ) : (
@@ -216,6 +230,7 @@ export default function App() {
             </div>
             <label>{L('cash')} <input value={cashPaid} onChange={(e) => setCashPaid(e.target.value)} inputMode="decimal" data-testid="cash" /></label>
             <label>{L('card')} <input value={cardPaid} onChange={(e) => setCardPaid(e.target.value)} inputMode="decimal" data-testid="card" /></label>
+            {Number(cardPaid) > 0 && <label>{L('cardRef')} <input value={cardRef} onChange={(e) => setCardRef(e.target.value)} data-testid="card-ref" /></label>}
             <div>{L('remaining')}: {fmt(remaining)} · {L('change')}: {fmt(change)}</div>
             <button className="primary" disabled={!canPay} onClick={pay} data-testid="pay">{L('pay')}</button>
             <hr />

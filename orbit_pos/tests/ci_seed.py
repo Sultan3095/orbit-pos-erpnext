@@ -67,3 +67,22 @@ def run():
     shift.close_shift(sh, 120)
     frappe.db.commit()
     print("seed done", frappe.get_all("Sales Invoice", pluck="name"))
+
+
+def pending_close():
+    """CI helper: a cashier sells and closes BLIND, leaving a close that waits for manager approval."""
+    import uuid
+    frappe.set_user("Administrator")
+    em = "cashier.demo@orbit.test"
+    if not frappe.db.exists("User", em):
+        frappe.get_doc({"doctype": "User", "email": em, "first_name": "Cashier Demo", "send_welcome_email": 0,
+                        "roles": [{"role": "POS User"}, {"role": "Sales User"}, {"role": "Stock User"}, {"role": "Accounts User"}]}).insert()
+    frappe.set_user(em)
+    from orbit_pos.api import shift, sales
+    sh = shift.open_shift("Orbit Demo Profile", 100)["name"]
+    p = {"txn_id": "DEMO-" + uuid.uuid4().hex[:6], "shift": sh, "lines": [{"itemId": "Chips", "qty": 3, "price": 4}],
+         "payments": [{"method": "Cash", "amount": 12}]}
+    r = sales.submit_sale(json.dumps(p))
+    z = shift.close_shift(sh, 110)
+    frappe.db.commit()
+    open("/tmp/orbit_pending.json", "w").write(json.dumps({"shift": sh, "invoice": r["sales_invoice"], "pending": z.get("pending")}))

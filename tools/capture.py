@@ -169,6 +169,45 @@ with sync_playwright() as p:
         log.append(("pos-flow", "FAIL " + str(e)[:200]))
         shot(page, "pos-flow-failure")
 
+    # ---- manager approval of a blind close, then edit of an invoice in the closed shift
+    try:
+        pend = json.load(open("/tmp/orbit_pending.json"))
+        go(page, "/app/orbit-pos"); time.sleep(3)
+        fr = page.frame_locator("iframe")
+        cap(page, "المدير: قفل شيفت بانتظار الاعتماد (الكاشير قفل أعمى)")
+        fr.get_by_test_id("approvals").wait_for(timeout=20000)
+        shot(page, "web-approvals-list")
+        fr.get_by_test_id("approvals").locator("button").first.click(); time.sleep(2)
+        fr.get_by_test_id("cv-expected").wait_for(timeout=20000)
+        txt = fr.get_by_test_id("close-view").inner_text()
+        assert "110" in txt and "-2" in txt.replace(" ", ""), "expected/diff not shown to manager: " + txt
+        cap(page, "المدير يشوف المتوقع والمقفول بيه والفرق قبل الاعتماد")
+        shot(page, "web-approve-view")
+        fr.get_by_test_id("cv-note").fill("فرق بسيط، تمت المراجعة")
+        fr.get_by_test_id("cv-approve").click(); time.sleep(2)
+        fr.get_by_test_id("approved-z").wait_for(timeout=20000)
+        cap(page, "تم اعتماد القفل")
+        shot(page, "web-approved")
+        fr.get_by_test_id("ed-q").fill(pend["invoice"]); fr.get_by_test_id("ed-search").click(); time.sleep(2)
+        fr.get_by_test_id("ed-pick-" + pend["invoice"]).click(); time.sleep(2)
+        fr.get_by_test_id("ed-closed").wait_for(timeout=20000)
+        cap(page, "الفاتورة في شيفت مقفول: لازم إلغاء القفل الأول")
+        shot(page, "web-edit-closed")
+        fr.get_by_test_id("ed-reason-reopen").fill("تصحيح كمية"); fr.get_by_test_id("ed-reopen").click(); time.sleep(3)
+        fr.get_by_test_id("ed-form").wait_for(timeout=20000)
+        cap(page, "بعد إلغاء القفل: تعديل الدفع وتسجيل السبب")
+        shot(page, "web-edit-form")
+        fr.get_by_test_id("ed-card").fill("12"); fr.get_by_test_id("ed-cash").fill("0")
+        fr.get_by_test_id("ed-ref").fill("AUTH-778899")
+        fr.get_by_test_id("ed-reason").fill("العميل دفع كارت")
+        fr.get_by_test_id("ed-save").click(); time.sleep(3)
+        msg = fr.get_by_test_id("ed-msg").inner_text()
+        assert "-r1" in msg or "Edited" in msg or "اتعدلت" in msg, "edit not saved: " + msg
+        cap(page, "اتعملت نسخة معدّلة مرتبطة بالأصل"); shot(page, "web-edit-saved")
+    except Exception as e:
+        log.append(("approve-edit-flow", "FAIL " + str(e)[:300]))
+        shot(page, "approve-edit-failure")
+
     # ---- desk screens
     screens = [
         ("/app/orbit-pos-settings", "settings", "إعدادات Orbit POS: مدة المرتجع، حد خصم الكاشير، الولاء"),

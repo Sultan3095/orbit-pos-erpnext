@@ -192,3 +192,13 @@ def my_permissions():
     from .common import role_of, matrix, DEFAULTS
     role = role_of()
     return {"role": role, "perms": {k: perm(k) for k in DEFAULTS}}
+
+
+@frappe.whitelist()
+def pending_closes():
+    """Blind closes waiting for approval. Approvers only. No amounts here: they are shown by pending_close_view."""
+    require_pos_user()
+    if not (can("approve") and can("seeExpected")):
+        frappe.throw(frappe._("Not permitted"), frappe.PermissionError)
+    return frappe.get_all("POS Shift", filters={"approval_status": "Pending", "status": "Closed"},
+                          fields=["name", "user", "closed_at", "pos_profile"], order_by="closed_at desc")

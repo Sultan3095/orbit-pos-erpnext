@@ -52,6 +52,7 @@ jobs:
           cd ~/bench
           test -f apps/orbit_pos/orbit_pos/public/pos/index.html && echo "UI bundle present in app" || { echo "UI bundle MISSING"; exit 1; }
           bench --site test_site execute orbit_pos.tests.ci_seed.run
+          bench --site test_site execute orbit_pos.tests.ci_seed.pending_close
           sed -i '/redis/d;/watch/d;/socketio/d' Procfile
           bench build > /tmp/build.log 2>&1 || tail -20 /tmp/build.log
           bench use test_site

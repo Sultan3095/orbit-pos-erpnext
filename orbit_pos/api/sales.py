@@ -473,3 +473,27 @@ def edit_invoice(invoice, payload, reason, manager=None, pin=None):
     res["revision_of"] = invoice
     res["rev"] = rev
     return res
+
+
+@frappe.whitelist()
+def invoice_for_edit(invoice):
+    """Everything the edit screen needs: lines, payments, the shift state and why an edit may be blocked."""
+    require_pos_user()
+    si = frappe.get_doc("Sales Invoice", invoice)
+    if si.is_return or not si.orbit_shift:
+        frappe.throw(frappe._("This invoice cannot be edited or voided here"))
+    sh = frappe.db.get_value("POS Shift", si.orbit_shift, ["status", "user"], as_dict=True)
+    blockers = []
+    if si.docstatus != 1:
+        blockers.append("cancelled")
+    if frappe.db.exists("Sales Invoice", {"return_against": invoice, "docstatus": 1}):
+        blockers.append("returns")
+    if frappe.db.exists("POS Exchange Receipt", {"redeemed_in": invoice}):
+        blockers.append("exchange")
+    lines_locked = bool(flt(si.discount_amount)) or any(r.get("orbit_promo") or r.get("serial_no") or r.get("batch_no") or flt(r.discount_amount) for r in si.items)
+    return {"invoice": si.name, "shift": si.orbit_shift, "shift_open": sh.status == "Open", "shift_user": sh.user,
+            "customer": si.customer, "grand_total": flt(si.grand_total), "rev": int(si.get("orbit_rev") or 0),
+            "lines": [{"itemId": r.item_code, "name": r.item_name, "qty": flt(r.qty), "price": flt(r.price_list_rate or r.rate)} for r in si.items],
+            "payments": [{"method": p.mode_of_payment, "amount": flt(p.amount), "ref": p.get("orbit_ref") or ""} for p in si.payments],
+            "blockers": blockers, "lines_locked": lines_locked,
+            "can_edit": can("editInvoice"), "can_void": can("voidInvoice"), "can_reopen": can("editInvoice")}

@@ -129,7 +129,7 @@ def get_receipt(invoice):
     is_walkin = (not si.customer) or si.customer == walkin
     lines = [{"name": r.item_name, "qty": flt(r.qty), "rate": flt(r.rate), "amount": flt(r.amount),
               "promo": bool(r.get("orbit_promo")), "serial": ", ".join(row_serials(r))} for r in si.items]
-    pays = [{"method": p.mode_of_payment, "amount": flt(p.amount)} for p in si.payments]
+    pays = [{"method": p.mode_of_payment, "amount": flt(p.amount), "ref": p.get("orbit_ref") or ""} for p in si.payments]
     out = {"invoice": si.name, "is_return": bool(si.is_return), "against": si.return_against, "date": str(si.posting_date),
            "time": str(si.posting_time)[:5], "company": si.company, "branch": si.orbit_branch or "",
            "cashier": frappe.db.get_value("User", si.owner, "full_name") or si.owner,
