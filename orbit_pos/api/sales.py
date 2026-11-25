@@ -130,7 +130,7 @@ def _submit_sale(payload):
     sh = frappe.db.get_value("POS Shift", shift, ["status", "user", "shared_shift", "pos_profile", "branch"], as_dict=True)
     if not sh or sh.status != "Open":
         frappe.throw(frappe._("Shift is not open"))
-    if sh.user != frappe.session.user and not sh.shared_shift:
+    if sh.user != frappe.session.user and not sh.shared_shift and not frappe.flags.get("orbit_revision"):
         frappe.throw(frappe._("This shift belongs to another user"), frappe.PermissionError)
     _check_discount_authority(p, shift)
 
@@ -467,7 +467,11 @@ def edit_invoice(invoice, payload, reason, manager=None, pin=None):
     log_approval(who, "Edit Invoice", invoice, reason, si.orbit_shift)
     _reverse_loyalty(si)
     si.cancel()
-    res = _submit_sale(json.dumps(p))
+    frappe.flags.orbit_revision = True      # approved editor posts into the original (reopened) shift
+    try:
+        res = _submit_sale(json.dumps(p))
+    finally:
+        frappe.flags.orbit_revision = False
     frappe.db.set_value("Sales Invoice", res["sales_invoice"], {"orbit_revision_of": root, "orbit_rev": rev, "orbit_edit_reason": reason},
                         update_modified=False)
     res["revision_of"] = invoice
