@@ -94,7 +94,25 @@ def _check_discount_authority(p, shift):
 
 @frappe.whitelist()
 def submit_sale(payload):
-    """Create a POS Sales Invoice. Safe to retry: the same txn_id and payload returns the same invoice."""
+    """Create a POS Sales Invoice. Safe to retry: the same txn_id and payload returns the same invoice.
+    Two requests with the same txn_id at the same moment (double tap, retry while the first is still running)
+    must not fail: the loser waits for the winner's invoice and returns it as a duplicate."""
+    try:
+        return _submit_sale(payload)
+    except frappe.UniqueValidationError:
+        p = frappe.parse_json(payload)
+        frappe.db.rollback()
+        import time
+        for _ in range(40):
+            si = frappe.db.get_value("Sales Invoice", {"orbit_txn_id": p["txn_id"], "docstatus": 1}, "name")
+            if si:
+                return {"status": "duplicate", "sales_invoice": si}
+            time.sleep(0.25)
+            frappe.db.rollback()   # fresh snapshot for the next read
+        raise
+
+
+def _submit_sale(payload):
     require_pos_user()
     p = frappe.parse_json(payload)
     txn_id = p["txn_id"]
