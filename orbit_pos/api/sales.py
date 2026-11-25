@@ -388,6 +388,10 @@ def create_return(invoice, items, manager=None, pin=None, current_branch=None, m
     ret.paid_amount = ret.grand_total
     ret.insert()
     ret.submit()
+    if orig.customer:   # points earned on goods that come back are taken back (same rule as the desktop app)
+        back = points_earned(abs(ret.grand_total), flt(settings().currency_per_point))
+        if back:
+            _ledger(orig.customer, -int(back), ret.name, "return")
     receipt = None
     if mode == "credit":
         receipt = _issue_receipt(orig.customer, abs(ret.grand_total), ret.name, ret.orbit_shift).name

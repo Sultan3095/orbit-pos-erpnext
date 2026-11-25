@@ -487,3 +487,14 @@ class TestFlows(Base):
         self.assertTrue(doc.has_permlevel_access_to("item_name"))
         frappe.set_user("Administrator")
         self.assertTrue(frappe.get_doc("Item", "ORB-A").has_permlevel_access_to("valuation_rate"))
+
+    def test_27_return_takes_back_loyalty_points(self):
+        from orbit_pos.api import sales, exchange
+        s = frappe.get_doc("Orbit POS Settings"); s.currency_per_point = 10; s.save()
+        c = exchange.create_customer("Loyalty Return Cust", "01000000077")
+        sh = self._shift()
+        r = self._sale(sh, [{"itemId": "ORB-A", "qty": 2, "price": 10}], 20, customer=c["name"])
+        pts = lambda: frappe.db.sql("select coalesce(sum(points),0) from `tabLoyalty Ledger Entry` where customer=%s", c["name"])[0][0]
+        self.assertEqual(int(pts()), 2)
+        sales.create_return(r["sales_invoice"], json.dumps([{"item_code": "ORB-A", "qty": 1}]))
+        self.assertEqual(int(pts()), 1)
