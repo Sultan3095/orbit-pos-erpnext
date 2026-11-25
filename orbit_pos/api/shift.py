@@ -56,7 +56,8 @@ def cash_movement(shift, direction, amount, reason, manager=None, pin=None):
     if frappe.db.get_value("POS Shift", shift, "status") != "Open":
         frappe.throw(frappe._("Shift is closed"))
     approved = None
-    if direction == "Out" and "POS Manager" not in frappe.get_roles():
+    from orbit_pos.api.common import settings
+    if direction == "Out" and "POS Manager" not in frappe.get_roles() and amount > flt(settings().cashier_cash_out_limit):
         approved = verify_manager_pin(manager, pin)
         log_approval(approved, "Cash Out", shift, f"{amount} {reason}", shift)
     doc = frappe.get_doc({"doctype": "POS Cash Movement", "shift": shift, "direction": direction,

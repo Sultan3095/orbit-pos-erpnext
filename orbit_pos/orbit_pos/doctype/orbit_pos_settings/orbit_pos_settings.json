@@ -28,6 +28,13 @@
    "default": "10"
   },
   {
+   "fieldname": "cashier_cash_out_limit",
+   "fieldtype": "Currency",
+   "label": "Cashier Cash Out Limit",
+   "default": "200",
+   "description": "A cashier cash-out above this amount needs a manager PIN"
+  },
+  {
    "fieldname": "currency_per_point",
    "fieldtype": "Currency",
    "label": "Currency Per Point",

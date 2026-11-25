@@ -37,6 +37,7 @@ async function mock(method, a) {
   if (!mockOnline) { const e = new Error('network'); throw e; }
   if (method === 'shift.current_shift') return mockShift;
   if (method === 'shift.open_shift') { if (mockShift) throw Object.assign(new Error('already open'), { permanent: true }); mockShift = { name: 'SHIFT-00001', status: 'Open', opening_cash: +a.opening_cash }; return mockShift; }
+  if (method === 'shift.cash_movement') { if (a.direction === 'Out' && +a.amount > 200 && !a.pin) throw Object.assign(new Error('Manager approval required'), { permanent: true }); mockShift.cashOut = (mockShift.cashOut || 0) + (a.direction === 'Out' ? +a.amount : -+a.amount); return { name: 'CM-1', amount: +a.amount, direction: a.direction }; }
   if (method === 'shift.close_shift') { const z = { shift: mockShift.name, expected_cash: mockShift.opening_cash, counted_cash: +a.counted_cash, difference: +a.counted_cash - mockShift.opening_cash }; mockShift = null; return z; }
   if (method === 'sales.lookup') { const c = CATALOG[a.code]; if (!c) throw Object.assign(new Error('not found'), { permanent: true }); return { name: a.code, item_name: c.name, price: c.price, item_group: c.item_group, qty: 1 }; }
   if (method === 'sales.quote') return mockQuote(JSON.parse(a.payload).lines);

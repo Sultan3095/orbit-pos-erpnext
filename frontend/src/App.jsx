@@ -20,6 +20,7 @@ export default function App() {
   const [opening, setOpening] = useState('0');
   const [counted, setCounted] = useState('');
   const [z, setZ] = useState(null);
+  const [cm, setCm] = useState(null);   // cash in/out dialog state
   const [online, setOnline] = useState(true);
   const [pending, setPending] = useState(queue.list().length);
   const counter = useRef(Number(localStorage.getItem('orbit_counter') || 0));
@@ -95,6 +96,20 @@ export default function App() {
   }
 
   async function openShift() { try { setShift(await api('shift.open_shift', { pos_profile: localStorage.getItem('orbit_profile') || 'POS', opening_cash: opening, terminal: TERMINAL })); } catch (e) { setMsg(e.message); } }
+  async function saveCashMove() {
+    const amount = Number(cm.amount);
+    if (!(amount > 0)) { setCm({ ...cm, err: L('invalidAmount') }); return; }
+    if (!cm.reason.trim()) { setCm({ ...cm, err: L('reasonRequired') }); return; }
+    try {
+      const args = { shift: shift.name, direction: cm.direction, amount, reason: cm.reason.trim() };
+      if (cm.needPin) { args.manager = cm.manager; args.pin = cm.pin; }
+      await api('shift.cash_movement', args);
+      setMsg((cm.direction === 'Out' ? L('cashOut') : L('cashIn')) + ': ' + fmt(amount) + ' — ' + cm.reason.trim()); setCm(null);
+    } catch (e) {
+      const needs = /approval required|manager|PIN/i.test(e.message || '');
+      setCm({ ...cm, needPin: cm.needPin || needs, err: e.message });
+    }
+  }
   async function closeShift() { try { setZ(await api('shift.close_shift', { shift: shift.name, counted_cash: counted })); setShift(null); } catch (e) { setMsg(e.message); } }
 
   return (
@@ -140,6 +155,22 @@ export default function App() {
             <label>{L('card')} <input value={cardPaid} onChange={(e) => setCardPaid(e.target.value)} inputMode="decimal" data-testid="card" /></label>
             <div>{L('remaining')}: {fmt(remaining)} · {L('change')}: {fmt(change)}</div>
             <button className="primary" disabled={!canPay} onClick={pay} data-testid="pay">{L('pay')}</button>
+            <hr />
+            <button onClick={() => setCm({ direction: 'Out', amount: '', reason: '', manager: '', pin: '', needPin: false, err: '' })} data-testid="cash-out">{L('cashOut')}</button>
+            <button onClick={() => setCm({ direction: 'In', amount: '', reason: '', manager: '', pin: '', needPin: false, err: '' })} data-testid="cash-in">{L('cashIn')}</button>
+            {cm && (
+              <div className="card" data-testid="cm-dialog">
+                <h3>{cm.direction === 'Out' ? L('cashOut') : L('cashIn')}</h3>
+                <label>{L('amount')} <input value={cm.amount} onChange={(e) => setCm({ ...cm, amount: e.target.value })} inputMode="decimal" data-testid="cm-amount" /></label>
+                <label>{L('reason')} <input value={cm.reason} onChange={(e) => setCm({ ...cm, reason: e.target.value })} data-testid="cm-reason" /></label>
+                {cm.needPin && <>
+                  <label>{L('managerUser')} <input value={cm.manager} onChange={(e) => setCm({ ...cm, manager: e.target.value })} data-testid="cm-manager" /></label>
+                  <label>{L('managerPin')} <input type="password" value={cm.pin} onChange={(e) => setCm({ ...cm, pin: e.target.value })} data-testid="cm-pin" /></label>
+                </>}
+                {cm.err && <div className="msg" data-testid="cm-err">{cm.err}</div>}
+                <button className="primary" onClick={saveCashMove} data-testid="cm-save">{L('save')}</button>
+                <button onClick={() => setCm(null)}>{L('cancel')}</button>
+              </div>)}
             <hr />
             <label>{L('countedCash')} <input value={counted} onChange={(e) => setCounted(e.target.value)} inputMode="decimal" data-testid="counted" /></label>
             <button onClick={closeShift} data-testid="close">{L('closeShift')}</button>

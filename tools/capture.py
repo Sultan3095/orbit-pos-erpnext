@@ -31,6 +31,7 @@ with sync_playwright() as p:
     b = p.chromium.launch()
     ctx = b.new_context(viewport={"width": 1366, "height": 820}, record_video_dir=OUT + "/video", record_video_size={"width": 1366, "height": 820})
     page = ctx.new_page(); page.set_default_timeout(20000)
+    page.on("response", lambda r: log.append(("api", r.status, r.url.split("orbit_pos.api.")[-1][:60], "")) if "orbit_pos.api." in r.url and r.status >= 400 else None)
     go(page, "/login")
     shot(page, "login", "Orbit POS على ERPNext: تسجيل الدخول")
     page.fill("#login_email", "Administrator"); page.fill("#login_password", "admin"); page.click(".btn-login")
@@ -68,7 +69,15 @@ with sync_playwright() as p:
         cap(page, "Dark theme")
         shot(page, "pos-dark")
         fr.get_by_test_id("theme").select_option("light"); fr.get_by_test_id("lang").select_option("ar")
-        fr.get_by_test_id("counted").fill("125")
+        # petty cash: the cashier takes 50 from the drawer for bags from the supermarket
+        fr.get_by_test_id("cash-out").click(); fr.get_by_test_id("cm-amount").fill("50")
+        cap(page, "عهدة: الكاشير بياخد 50 جنيه من الدرج. السبب إجباري"); shot(page, "pos-cashout-dialog", None, 500)
+        fr.get_by_test_id("cm-save").click(); time.sleep(1.5)
+        fr.get_by_test_id("cm-reason").fill("أكياس من السوبر ماركت") if fr.get_by_test_id("cm-reason").count() else None
+        if fr.get_by_test_id("cm-save").count():
+            fr.get_by_test_id("cm-save").click(); time.sleep(2)
+        cap(page, "اتسجلت حركة السحب على الوردية"); shot(page, "pos-cashout-saved")
+        fr.get_by_test_id("counted").fill("75")
         cap(page, "إغلاق الشيفت بالعد الفعلي للكاش")
         fr.get_by_test_id("close").click(); time.sleep(2)
         cap(page, "تقرير الإغلاق: المتوقع والفعلي والفرق")

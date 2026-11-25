@@ -174,11 +174,16 @@ class TestFlows(Base):
     def test_09_cashier_cash_out_needs_pin(self):
         from orbit_pos.api import shift
         frappe.set_user("cashier@orbit.test")
-        sh = self._shift(50)
+        sh = self._shift(500)
+        small = shift.cash_movement(sh, "Out", 50, "bags from the supermarket")   # within the default 200 limit
+        self.assertFalse(small.get("approved_by"))
         with self.assertRaises(frappe.PermissionError):
-            shift.cash_movement(sh, "Out", 5, "x")
-        m = shift.cash_movement(sh, "Out", 5, "x", manager="boss@orbit.test", pin="4321")
+            shift.cash_movement(sh, "Out", 300, "x")
+        m = shift.cash_movement(sh, "Out", 300, "x", manager="boss@orbit.test", pin="4321")
         self.assertEqual(m["approved_by"], "boss@orbit.test")
+        z = shift.close_shift(sh, 150)
+        self.assertEqual(flt(z["expected_cash"]), 150.0)    # 500 - 50 - 300
+        self.assertEqual(flt(z["difference"]), 0.0)
 
     def test_10_one_open_shift_per_user(self):
         self._shift()

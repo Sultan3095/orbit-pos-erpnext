@@ -30,6 +30,18 @@ try {
   await p.type('[data-testid=scan]', '999'); await p.keyboard.press('Enter'); await new Promise((r) => setTimeout(r, 300));
   assert.ok((await txt('[data-testid=msg]')).includes('Item not found'));
   await p.select('[data-testid=theme]', 'dark'); await p.screenshot({ path: OUT + '/4-dark.png' });
+  // petty cash: reason is mandatory, small cash-out saves, large one asks for the manager PIN
+  await p.click('[data-testid=cash-out]'); await p.waitForSelector('[data-testid=cm-dialog]');
+  await p.type('[data-testid=cm-amount]', '50'); await p.click('[data-testid=cm-save]');
+  assert.ok((await txt('[data-testid=cm-err]')).includes('required'), 'reason required');
+  await p.type('[data-testid=cm-reason]', 'bags from the supermarket'); await p.screenshot({ path: OUT + '/5-cashout-dialog.png' });
+  await p.click('[data-testid=cm-save]'); await new Promise((r) => setTimeout(r, 400));
+  assert.equal(await p.$('[data-testid=cm-dialog]'), null); assert.ok((await txt('[data-testid=msg]')).includes('50.00'));
+  await p.click('[data-testid=cash-out]'); await p.type('[data-testid=cm-amount]', '300'); await p.type('[data-testid=cm-reason]', 'big');
+  await p.click('[data-testid=cm-save]'); await p.waitForSelector('[data-testid=cm-pin]'); await p.screenshot({ path: OUT + '/6-cashout-pin.png' });
+  await p.click('[data-testid=cash-in]'); // reopen as cash in resets the dialog
+  await p.type('[data-testid=cm-amount]', '5'); await p.type('[data-testid=cm-reason]', 'float'); await p.click('[data-testid=cm-save]'); await new Promise((r) => setTimeout(r, 400));
+  assert.equal(await p.$('[data-testid=cm-dialog]'), null);
   await p.type('[data-testid=counted]', '0'); await p.click('[data-testid=close]'); await p.waitForSelector('[data-testid=z]');
   console.log('UI e2e (mock API) PASSED');
 } finally { await b.close(); srv.kill(); }
