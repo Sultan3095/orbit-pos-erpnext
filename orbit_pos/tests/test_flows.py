@@ -415,7 +415,7 @@ class TestFlows(Base):
         r = shift.close_shift(sh, 115)
         self.assertTrue(r["pending"])
         self.assertEqual(frappe.db.get_value("POS Shift", sh, "approval_status"), "Pending")
-        self.assertIsNone(frappe.db.get_value("POS Shift", sh, "expected_cash"))
+        self.assertFalse(frappe.db.get_value("POS Shift", sh, "expected_cash"))   # hidden while pending
         z = shift.z_report(sh); self.assertIsNone(z["expected_cash"]); self.assertIsNone(z["difference"])
         with self.assertRaises(frappe.PermissionError):                 # a cashier may not look or approve
             shift.pending_close_view(sh)
