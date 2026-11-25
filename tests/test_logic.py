@@ -2,7 +2,7 @@ import unittest
 from datetime import date, datetime
 from orbit_pos.logic.promotions import apply_promotions, promo_active
 from orbit_pos.logic.barcodes import make_ean13, valid_ean13, parse_scale_barcode, ean13_check_digit
-from orbit_pos.logic.returns import return_allowed, refund_amount, cross_branch_allowed
+from orbit_pos.logic.returns import return_allowed, refund_amount, cross_branch_allowed, credit_expiry, credit_expired, split_credit
 from orbit_pos.logic.loyalty import points_earned, redeem_value
 from orbit_pos.logic.offline import TxnRegistry, make_txn_id
 
@@ -124,3 +124,20 @@ class Misc(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExchangeCredit(unittest.TestCase):
+    def test_expiry_follows_the_setting(self):
+        self.assertEqual(credit_expiry(date(2026, 1, 1), 14), date(2026, 1, 15))
+        self.assertEqual(credit_expiry(date(2026, 1, 1), 7), date(2026, 1, 8))
+        self.assertEqual(credit_expiry("2026-01-01", 30), date(2026, 1, 31))
+        self.assertIsNone(credit_expiry(date(2026, 1, 1), 0))
+
+    def test_expired_only_after_last_day(self):
+        self.assertFalse(credit_expired(date(2026, 1, 15), date(2026, 1, 15)))
+        self.assertTrue(credit_expired(date(2026, 1, 15), date(2026, 1, 16)))
+        self.assertFalse(credit_expired(None, date(2030, 1, 1)))
+
+    def test_split_credit(self):
+        self.assertEqual(split_credit(10, 4), (4.0, 6.0))
+        self.assertEqual(split_credit(10, 15), (10.0, 0.0))

@@ -31,3 +31,31 @@ def refund_amount(line_net_paid: float, line_qty: float, return_qty: float,
 
 def cross_branch_allowed(sale_branch: str, current_branch: str, allow_cross: bool) -> bool:
     return sale_branch == current_branch or bool(allow_cross)
+
+
+def credit_expiry(issued, window_days: int):
+    """Valid-until date of an exchange receipt: the configured window counted from the day it is issued.
+    None means no limit (window 0)."""
+    from datetime import timedelta
+    if isinstance(issued, str):
+        issued = date.fromisoformat(issued[:10])
+    if isinstance(issued, datetime):
+        issued = issued.date()
+    return None if not window_days or window_days <= 0 else issued + timedelta(days=int(window_days))
+
+
+def credit_expired(expires_on, today=None) -> bool:
+    if not expires_on:
+        return False
+    today = today or date.today()
+    if isinstance(expires_on, str):
+        expires_on = date.fromisoformat(expires_on[:10])
+    if isinstance(expires_on, datetime):
+        expires_on = expires_on.date()
+    return today > expires_on
+
+
+def split_credit(credit: float, total: float):
+    """Apply a credit to a sale: (used, left). The credit can never pay more than the sale total."""
+    used = r2(min(credit, total))
+    return used, r2(credit - used)

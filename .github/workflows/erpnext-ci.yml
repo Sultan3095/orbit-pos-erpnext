@@ -47,7 +47,6 @@ jobs:
           bench --site test_site execute orbit_pos.tests.ci_setup.run
           bench --site test_site run-tests --app orbit_pos
       - name: UI capture (screenshots and walkthrough video)
-        continue-on-error: true
         run: |
           cd frontend && npm install && npm run build && cd ..
           cd ~/bench

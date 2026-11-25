@@ -11,9 +11,9 @@
   {
    "fieldname": "return_window_days",
    "fieldtype": "Int",
-   "label": "Return Window Days",
+   "label": "Exchange / Return Window (days)",
    "default": "14",
-   "description": "0 = no limit"
+   "description": "Printed on exchange receipts. 0 = no limit. After the window a manager PIN is needed."
   },
   {
    "fieldname": "allow_cross_branch_returns",
@@ -99,6 +99,22 @@
    "label": "Eta Note",
    "read_only": 1,
    "default": "ETA credentials are never stored here in plain text. Use a vault/secret."
+  },
+  {
+   "fieldname": "terms_section",
+   "fieldtype": "Section Break",
+   "label": "Receipt Terms & Conditions"
+  },
+  {
+   "fieldname": "receipt_terms_ar",
+   "fieldtype": "Small Text",
+   "label": "Terms (Arabic)",
+   "description": "Printed at the bottom of every receipt. Write your exchange policy here in your own words."
+  },
+  {
+   "fieldname": "receipt_terms_en",
+   "fieldtype": "Small Text",
+   "label": "Terms (English)"
   }
  ],
  "permissions": [

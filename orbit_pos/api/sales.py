@@ -3,7 +3,7 @@ import json
 import frappe
 from frappe.utils import flt, nowdate, getdate, now_datetime
 from orbit_pos.logic.promotions import apply_promotions, r2
-from orbit_pos.logic.returns import return_allowed, refund_amount, cross_branch_allowed
+from orbit_pos.logic.returns import return_allowed, refund_amount, cross_branch_allowed, credit_expiry, credit_expired, split_credit
 from orbit_pos.logic.loyalty import points_earned, redeem_value
 from orbit_pos.logic.barcodes import make_ean13, parse_scale_barcode
 from .common import require_pos_user, verify_manager_pin, log_approval, settings
@@ -64,7 +64,7 @@ def _compute(lines, customer_points=0, inv_pct=0, inv_amt=0):
     redeem = redeem_value(customer_points, flt(s.value_per_point), max(0.0, sub - manual_inv - pr["invoicePromoDisc"]))
     inv_disc = r2(min(sub, manual_inv + pr["invoicePromoDisc"] + redeem))
     return {"lines": pr["lines"], "subtotal": sub, "invoice_discount": inv_disc, "redeem_value": redeem,
-            "net_before_tax": r2(sub - inv_disc)}
+            "net_before_tax": r2(sub - inv_disc), "invoice_promo_disc": pr["invoicePromoDisc"]}
 
 
 @frappe.whitelist()
@@ -133,7 +133,8 @@ def submit_sale(payload):
         rates.append((src["price"], unit_disc))
         row = {"item_code": src["itemId"], "qty": src["qty"], "price_list_rate": src["price"],
                "rate": src["price"] - unit_disc,
-               "discount_amount": unit_disc, "warehouse": prof.warehouse}
+               "discount_amount": unit_disc, "warehouse": prof.warehouse,
+               "orbit_promo": 1 if (l["promoDisc"] > 0 or calc["invoice_promo_disc"] > 0) else 0}
         if src.get("batch_no") or src.get("serial_no"):
             row["use_serial_batch_fields"] = 1   # v16 (and recent v15) read batch/serial from these fields
         if src.get("batch_no"):
@@ -156,6 +157,12 @@ def submit_sale(payload):
     si.calculate_taxes_and_totals()
 
     paid = 0.0
+    rec, credit_used, credit_left = None, 0.0, 0.0
+    if p.get("exchange_receipt"):
+        rec = _open_receipt(p["exchange_receipt"])
+        credit_used, credit_left = split_credit(flt(rec.amount), flt(si.grand_total))
+        si.append("payments", {"mode_of_payment": ensure_credit_mode(prof.company), "amount": credit_used})
+        paid += credit_used
     for pay in p["payments"]:
         si.append("payments", {"mode_of_payment": pay["method"], "amount": flt(pay["amount"])})
         paid += flt(pay["amount"])
@@ -176,6 +183,11 @@ def submit_sale(payload):
     si.insert()
     si.submit()
 
+    new_receipt = None
+    if rec:
+        rec.db_set({"status": "Redeemed", "redeemed_in": si.name})
+        if credit_left > 0.004:
+            new_receipt = _issue_receipt(customer, credit_left, None, shift, rec.expires_on, source=rec.name).name
     if customer:
         earned = points_earned(si.grand_total, flt(settings().currency_per_point))
         if earned:
@@ -184,7 +196,8 @@ def submit_sale(payload):
             _ledger(customer, -pts, si.name, "redeem")
     frappe.get_doc({"doctype": "Offline Transaction", "txn_id": txn_id, "terminal": p.get("terminal"), "shift": shift,
                     "payload_hash": body_hash, "status": "Created", "sales_invoice": si.name}).insert(ignore_permissions=True)
-    return {"status": "created", "sales_invoice": si.name, "grand_total": si.grand_total, "change": change}
+    return {"status": "created", "sales_invoice": si.name, "grand_total": si.grand_total, "change": change,
+            "exchange_credit_used": credit_used, "new_exchange_receipt": new_receipt}
 
 
 def _balance(customer):
@@ -198,11 +211,81 @@ def _ledger(customer, pts, inv, note):
                     "sales_invoice": inv, "note": note}).insert(ignore_permissions=True)
 
 
+CREDIT_MODE = "Exchange Credit"
+
+
+def ensure_credit_mode(company):
+    """Mode of Payment that carries exchange credit (a liability account, never counted as drawer cash)."""
+    if not frappe.db.exists("Mode of Payment", CREDIT_MODE):
+        frappe.get_doc({"doctype": "Mode of Payment", "mode_of_payment": CREDIT_MODE, "type": "General"}).insert(ignore_permissions=True)
+    mop = frappe.get_doc("Mode of Payment", CREDIT_MODE)
+    if not [a for a in mop.accounts if a.company == company]:
+        acc = frappe.db.get_value("Account", {"company": company, "account_name": "Exchange Credits", "is_group": 0}, "name")
+        if not acc:
+            parent = frappe.db.get_value("Account", {"company": company, "account_name": "Current Liabilities", "is_group": 1}, "name") or \
+                frappe.db.get_value("Account", {"company": company, "root_type": "Liability", "is_group": 1}, "name")
+            acc = frappe.get_doc({"doctype": "Account", "account_name": "Exchange Credits", "company": company,
+                                  "parent_account": parent, "is_group": 0, "root_type": "Liability",
+                                  "account_type": ""}).insert(ignore_permissions=True).name
+        mop.append("accounts", {"company": company, "default_account": acc})
+        mop.save(ignore_permissions=True)
+    return CREDIT_MODE
+
+
+def _issue_receipt(customer, amount, return_invoice, shift, expires_on=None, source=None):
+    days = int(settings().return_window_days or 0)
+    today = getdate(nowdate())
+    if expires_on is None:
+        expires_on = credit_expiry(today, days)
+    doc = frappe.get_doc({"doctype": "POS Exchange Receipt", "customer": customer, "amount": r2(amount), "status": "Open",
+                          "issued_on": today, "expires_on": expires_on, "return_invoice": return_invoice,
+                          "shift": shift, "issued_by": frappe.session.user, "source_receipt": source})
+    doc.insert(ignore_permissions=True)
+    return doc
+
+
+def _open_receipt(name):
+    if not frappe.db.exists("POS Exchange Receipt", name):
+        frappe.throw(frappe._("Exchange receipt {0} not found").format(name))
+    rec = frappe.get_doc("POS Exchange Receipt", name)
+    rec.reload()
+    if rec.status != "Open":
+        frappe.throw(frappe._("Exchange receipt {0} is already {1}").format(name, rec.status))
+    if credit_expired(rec.expires_on, getdate(nowdate())):
+        frappe.db.set_value("POS Exchange Receipt", name, "status", "Expired")
+        frappe.throw(frappe._("Exchange receipt {0} expired on {1}").format(name, rec.expires_on))
+    return rec
+
+
+def row_serials(row):
+    """Serial numbers of an invoice row, from the row text (v15/v16 serial fields) or its bundle."""
+    import re
+    if row.get("serial_no"):
+        return [x.strip() for x in re.split(r"[\n,]", row.serial_no) if x.strip()]
+    if row.get("serial_and_batch_bundle"):
+        return frappe.get_all("Serial and Batch Entry", filters={"parent": row.serial_and_batch_bundle},
+                              pluck="serial_no")
+    return []
+
+
+def returned_serials(orig_row_name):
+    out = []
+    for r in frappe.get_all("Sales Invoice Item", filters={"sales_invoice_item": orig_row_name, "docstatus": 1},
+                            fields=["name", "serial_no", "serial_and_batch_bundle"]):
+        out += row_serials(frappe._dict(r))
+    return out
+
+
 @frappe.whitelist()
-def create_return(invoice, items, manager=None, pin=None, current_branch=None):
-    """items: [{item_code, qty}] (qty positive). Window and cross-branch rules come from Orbit POS Settings."""
+def create_return(invoice, items, manager=None, pin=None, current_branch=None, mode="refund"):
+    """items: [{item_code, qty, row?, serial_no?: [..]}] (qty positive).
+    mode 'refund': money back through the original payment (never for promotion lines).
+    mode 'credit': an Exchange Receipt for the value (promotion lines are exchange only).
+    The window and cross-branch rules come from Orbit POS Settings."""
     require_pos_user()
     s = settings()
+    if mode not in ("refund", "credit"):
+        frappe.throw(frappe._("Unknown return mode"))
     orig = frappe.get_doc("Sales Invoice", invoice)
     if orig.docstatus != 1 or orig.is_return:
         frappe.throw(frappe._("Cannot return this document"))
@@ -218,24 +301,78 @@ def create_return(invoice, items, manager=None, pin=None, current_branch=None):
         log_approval(approver, "Return After Window", invoice, f"posted {orig.posting_date}")
     from erpnext.controllers.sales_and_purchase_return import make_return_doc
     ret = make_return_doc("Sales Invoice", invoice)
-    want = {i["item_code"]: flt(i["qty"]) for i in frappe.parse_json(items)}
-    ret.items = [r for r in ret.items if r.item_code in want]
-    for r in ret.items:
-        r.qty = -want[r.item_code]
+    by_row = {r.sales_invoice_item: r for r in ret.items}
+    orig_rows = {r.name: r for r in orig.items}
+    chosen, used = [], set()
+    for it in frappe.parse_json(items):
+        qty = flt(it.get("qty"))
+        if qty <= 0:
+            frappe.throw(frappe._("Return quantity must be positive"))
+        rn = it.get("row")
+        if not rn:
+            cands = [n for n, r in by_row.items() if r.item_code == it.get("item_code") and n not in used]
+            rn = cands[0] if cands else None
+        if not rn or rn not in by_row or rn in used:
+            frappe.throw(frappe._("Item {0} is not on this invoice or was already fully returned").format(it.get("item_code")))
+        used.add(rn)
+        r, o = by_row[rn], orig_rows[rn]
+        if qty > abs(flt(r.qty)) + 1e-9:
+            frappe.throw(frappe._("Cannot return {0} of {1}: only {2} left on this invoice").format(qty, r.item_code, abs(flt(r.qty))))
+        if o.get("orbit_promo") and mode == "refund":
+            frappe.throw(frappe._("{0} was sold under a promotion: exchange only, no cash refund").format(r.item_code))
+        has_serial = frappe.db.get_value("Item", r.item_code, "has_serial_no")
+        if has_serial:
+            sel = it.get("serial_no") or []
+            if isinstance(sel, str):
+                sel = [x for x in sel.split("\n") if x.strip()]
+            if not sel:
+                frappe.throw(frappe._("Choose the serial numbers of {0} being returned").format(r.item_code))
+            sold = set(row_serials(o)); back = set(returned_serials(o.name))
+            for sn in sel:
+                if sn not in sold:
+                    frappe.throw(frappe._("Serial {0} was not sold on invoice {1}").format(sn, invoice))
+                if sn in back:
+                    frappe.throw(frappe._("Serial {0} was already returned").format(sn))
+            if len(set(sel)) != len(sel) or len(sel) != qty:
+                frappe.throw(frappe._("Serial numbers must be unique and match the quantity"))
+            r.serial_and_batch_bundle = None
+            r.use_serial_batch_fields = 1
+            r.serial_no = "\n".join(sel)
+        r.qty = -qty
+        r.stock_qty = -qty * (flt(r.conversion_factor) or 1)
+        chosen.append((r, o))
+    if not chosen:
+        frappe.throw(frappe._("Choose at least one item to return"))
+    ret.items = [r for r, _ in chosen]
+    for i, r in enumerate(ret.items, 1):
+        r.idx = i
+    # the invoice-level discount follows the share of the invoice being returned
+    orig_net = sum(flt(o.qty) * flt(o.rate) for o in orig.items) or 1.0
+    back_net = sum(qty_rate(r) for r, _ in chosen)
+    ret.discount_amount = -flt(orig.discount_amount) * back_net / orig_net
     ret.orbit_branch = current_branch
     ret.orbit_shift = frappe.db.get_value("POS Shift", {"user": frappe.session.user, "status": "Open"}, "name")
     ret.update_stock = 1
     ret.calculate_taxes_and_totals()
-    if ret.is_pos:
-        # a POS return must refund through negative payment rows, so the cash drawer count stays right
+    ret.set("payments", [])
+    if mode == "credit":
+        ret.append("payments", {"mode_of_payment": ensure_credit_mode(ret.company), "amount": ret.grand_total})
+    else:
         modes = [p.mode_of_payment for p in orig.payments]
         cash = [m for m in modes if frappe.db.get_value("Mode of Payment", m, "type") == "Cash"]
-        ret.set("payments", [])
         ret.append("payments", {"mode_of_payment": (cash or modes or ["Cash"])[0], "amount": ret.grand_total})
-        ret.paid_amount = ret.grand_total
+    ret.paid_amount = ret.grand_total
     ret.insert()
     ret.submit()
-    return {"return_invoice": ret.name, "refund": abs(ret.grand_total), "approved_by": approver}
+    receipt = None
+    if mode == "credit":
+        receipt = _issue_receipt(orig.customer, abs(ret.grand_total), ret.name, ret.orbit_shift).name
+    return {"return_invoice": ret.name, "refund": abs(ret.grand_total), "approved_by": approver,
+            "mode": mode, "exchange_receipt": receipt}
+
+
+def qty_rate(r):
+    return abs(flt(r.qty)) * flt(r.rate)
 
 
 def guard_invoice(doc, method=None):

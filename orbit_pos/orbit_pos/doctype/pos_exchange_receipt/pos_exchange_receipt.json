@@ -1,0 +1,30 @@
+{
+ "doctype": "DocType",
+ "name": "POS Exchange Receipt",
+ "module": "Orbit POS",
+ "custom": 0,
+ "issingle": 0,
+ "istable": 0,
+ "engine": "InnoDB",
+ "autoname": "EXR-.#####",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "fields": [
+  {"fieldname": "customer", "fieldtype": "Link", "label": "Customer", "options": "Customer", "in_list_view": 1},
+  {"fieldname": "amount", "fieldtype": "Currency", "label": "Credit Amount", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "Open\nRedeemed\nExpired", "default": "Open", "in_list_view": 1},
+  {"fieldname": "issued_on", "fieldtype": "Date", "label": "Issued On"},
+  {"fieldname": "expires_on", "fieldtype": "Date", "label": "Valid Until", "in_list_view": 1},
+  {"fieldname": "return_invoice", "fieldtype": "Link", "label": "Return Invoice", "options": "Sales Invoice"},
+  {"fieldname": "redeemed_in", "fieldtype": "Link", "label": "Redeemed In", "options": "Sales Invoice"},
+  {"fieldname": "source_receipt", "fieldtype": "Link", "label": "Split From Receipt", "options": "POS Exchange Receipt"},
+  {"fieldname": "shift", "fieldtype": "Link", "label": "Shift", "options": "POS Shift"},
+  {"fieldname": "issued_by", "fieldtype": "Link", "label": "Issued By", "options": "User"}
+ ],
+ "permissions": [
+  {"role": "POS Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "report": 1, "export": 1},
+  {"role": "POS User", "read": 1, "write": 1, "create": 1, "report": 1},
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}
+ ]
+}

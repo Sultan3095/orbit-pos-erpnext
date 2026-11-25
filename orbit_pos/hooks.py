@@ -7,6 +7,7 @@ app_license = "MIT"
 required_apps = ["erpnext"]
 
 after_install = "orbit_pos.setup.install.after_install"
+after_migrate = "orbit_pos.setup.install.after_install"
 
 # The React UI is served as a Frappe page at /app/orbit-pos (built into public/)
 app_include_js = []

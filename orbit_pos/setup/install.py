@@ -14,6 +14,16 @@ CUSTOM_FIELDS = {
         dict(fieldname="orbit_branch", label="Orbit branch", fieldtype="Data", read_only=1, no_copy=1,
              insert_after="orbit_shift"),
     ],
+    "Sales Invoice Item": [
+        dict(fieldname="orbit_promo", label="Sold under a promotion (exchange only)", fieldtype="Check", read_only=1,
+             no_copy=1, insert_after="item_code"),
+    ],
+    "POS Profile": [
+        dict(fieldname="orbit_sale_receipt_format", label="Sale Receipt Format", fieldtype="Select",
+             options="Standard 80mm\nCompact 80mm", default="Standard 80mm", insert_after="company"),
+        dict(fieldname="orbit_return_receipt_format", label="Return / Exchange Receipt Format", fieldtype="Select",
+             options="Standard 80mm\nDetailed 80mm", default="Standard 80mm", insert_after="orbit_sale_receipt_format"),
+    ],
     "User": [
         dict(fieldname="orbit_pos_pin", label="POS PIN", fieldtype="Password", insert_after="mobile_no"),
     ],

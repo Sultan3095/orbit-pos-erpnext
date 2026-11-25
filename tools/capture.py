@@ -40,7 +40,7 @@ with sync_playwright() as p:
     go(page, "/login")
     shot(page, "login", "Orbit POS على ERPNext: تسجيل الدخول")
     page.fill("#login_email", "Administrator"); page.fill("#login_password", "admin"); page.press("#login_password", "Enter")
-    page.wait_for_url("**/app**", timeout=60000)
+    page.wait_for_function("() => !location.pathname.startsWith('/login')", timeout=60000)   # v15 lands on /app, v16 on /desk
     shot(page, "desk-home", "الصفحة الرئيسية لـ ERPNext", 3000)
 
     # ---- the POS screen
@@ -123,6 +123,9 @@ with sync_playwright() as p:
         shot(page, "invoice-form", "فاتورة كاشير: مرتبطة بالشيفت والـ transaction id", 1500)
     except Exception as e:
         log.append(("invoice-form", "FAIL " + str(e)[:80]))
-    ctx.close(); b.close()
+        ctx.close(); b.close()
 json.dump(log, open(OUT + "/capture-log.json", "w"), indent=1)
 print(json.dumps(log, indent=1))
+bad = [x for x in log if (len(x) == 2 and str(x[1]).startswith("FAIL")) or x[0] == "api"]
+if bad:
+    print("CAPTURE FAILED:", bad); sys.exit(1)
