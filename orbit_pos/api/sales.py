@@ -44,7 +44,7 @@ def _item_info(item):
 def next_barcode(item_code=None):
     """Atomic sequence on the settings doc. If item_code is given, the barcode is attached to the item."""
     require_pos_user()
-    frappe.db.sql("select name from `tabSingles` where doctype='Orbit POS Settings' and field='barcode_seq' for update")
+    frappe.db.sql("select value from `tabSingles` where doctype='Orbit POS Settings' and field='barcode_seq' for update")
     s = frappe.get_doc("Orbit POS Settings")
     s.barcode_seq = (s.barcode_seq or 0) + 1
     s.save(ignore_permissions=True)
@@ -126,10 +126,14 @@ def submit_sale(payload):
                "orbit_branch": sh.branch, "currency": prof.currency, "selling_price_list": prof.selling_price_list,
                "set_warehouse": prof.warehouse,
                "discount_amount": calc["invoice_discount"], "apply_discount_on": "Net Total"})
+    rates = []
     for src, l in zip(p["lines"], calc["lines"]):
         disc = r2(l["promoDisc"] + l["manualDisc"])
+        unit_disc = disc / src["qty"] if src["qty"] else 0
+        rates.append((src["price"], unit_disc))
         row = {"item_code": src["itemId"], "qty": src["qty"], "price_list_rate": src["price"],
-               "discount_amount": disc / src["qty"] if src["qty"] else 0, "warehouse": prof.warehouse}
+               "rate": src["price"] - unit_disc,
+               "discount_amount": unit_disc, "warehouse": prof.warehouse}
         if src.get("batch_no") or src.get("serial_no"):
             row["use_serial_batch_fields"] = 1   # v16 (and recent v15) read batch/serial from these fields
         if src.get("batch_no"):
@@ -142,6 +146,13 @@ def submit_sale(payload):
         si.taxes_and_charges = prof.taxes_and_charges
         si.set_taxes()
     si.set_missing_values()
+    # set_missing_values re-reads the price list; the engine's price and discounts must win, and ERPNext only
+    # keeps a discount_amount when the rate already reflects it
+    for row, (price, unit_disc) in zip(si.items, rates):
+        row.price_list_rate = price
+        row.discount_amount = unit_disc
+        row.rate = price - unit_disc
+    si.set("payments", [])   # drop the profile's default zero-amount rows
     si.calculate_taxes_and_totals()
 
     paid = 0.0
@@ -212,8 +223,16 @@ def create_return(invoice, items, manager=None, pin=None, current_branch=None):
     for r in ret.items:
         r.qty = -want[r.item_code]
     ret.orbit_branch = current_branch
+    ret.orbit_shift = frappe.db.get_value("POS Shift", {"user": frappe.session.user, "status": "Open"}, "name")
     ret.update_stock = 1
     ret.calculate_taxes_and_totals()
+    if ret.is_pos:
+        # a POS return must refund through negative payment rows, so the cash drawer count stays right
+        modes = [p.mode_of_payment for p in orig.payments]
+        cash = [m for m in modes if frappe.db.get_value("Mode of Payment", m, "type") == "Cash"]
+        ret.set("payments", [])
+        ret.append("payments", {"mode_of_payment": (cash or modes or ["Cash"])[0], "amount": ret.grand_total})
+        ret.paid_amount = ret.grand_total
     ret.insert()
     ret.submit()
     return {"return_invoice": ret.name, "refund": abs(ret.grand_total), "approved_by": approver}

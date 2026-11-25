@@ -154,6 +154,9 @@ class TestFlows(Base):
         ret = sales.create_return(r["sales_invoice"], json.dumps([{"item_code": "ORB-A", "qty": 1}]))
         self.assertEqual(ret["refund"], 10.0)
         self.assertEqual(stock("ORB-A"), before - 1)
+        ri = frappe.get_doc("Sales Invoice", ret["return_invoice"])
+        self.assertEqual(ri.orbit_shift, sh)
+        self.assertEqual(flt(ri.payments[0].amount), -10.0)
 
     def test_08_cash_movement_close_and_z_report(self):
         from orbit_pos.api import sales, shift
