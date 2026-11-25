@@ -201,8 +201,9 @@ with sync_playwright() as p:
         fr.get_by_test_id("ed-ref").fill("AUTH-778899")
         fr.get_by_test_id("ed-reason").fill("العميل دفع كارت")
         fr.get_by_test_id("ed-save").click(); time.sleep(3)
-        msg = fr.get_by_test_id("ed-msg").inner_text()
-        assert "-r1" in msg or "Edited" in msg or "اتعدلت" in msg, "edit not saved: " + msg
+        fr.get_by_test_id("receipt-modal").wait_for(timeout=20000)
+        rt = fr.get_by_test_id("receipt-sheet").inner_text()
+        assert "AUTH-778899" in rt, "card reference missing on the revised receipt: " + rt[:300]
         cap(page, "اتعملت نسخة معدّلة مرتبطة بالأصل"); shot(page, "web-edit-saved")
     except Exception as e:
         log.append(("approve-edit-flow", "FAIL " + str(e)[:300]))
