@@ -92,6 +92,13 @@ with sync_playwright() as p:
         fr.get_by_test_id("tab-returns").click(); time.sleep(1)
         fr.get_by_test_id("ret-search").fill("أحمد"); fr.get_by_test_id("ret-find").click(); time.sleep(2)
         cap(page, "المرتجعات: البحث عن الفاتورة بالاسم أو التليفون أو السيريال"); shot(page, "ret-search")
+        # re-print a CLOSED order from the list, any time
+        fr.get_by_test_id("inv-reprint").first.click(); time.sleep(1.5)
+        fr.get_by_test_id("receipt-modal").wait_for()
+        rp = fr.get_by_test_id("receipt-sheet").inner_text()
+        assert "ACC-SINV" in rp and fr.get_by_test_id("print-btn").count() == 1, "reprint of a closed invoice failed: " + rp[:200]
+        cap(page, "إعادة طباعة فاتورة مقفولة في أي وقت"); shot(page, "ret-reprint")
+        fr.get_by_test_id("receipt-close").click(); time.sleep(0.5)
         fr.get_by_test_id("inv-row").first.click(); time.sleep(2)
         cap(page, "بنود الفاتورة والمتبقي للإرجاع. بند العرض: استبدال فقط")
         shot(page, "ret-invoice")

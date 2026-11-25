@@ -24,6 +24,10 @@ export default function Returns({ L, branch, onReceipt, onExchange }) {
     try { const d = await api('exchange.invoice_for_return', { invoice: name }); setInv(d); setSel({}); setMode('credit'); }
     catch (err) { setMsg(err.message); }
   }
+  async function reprint(name) { // any closed order, any time: same receipt, print button inside
+    setMsg('');
+    try { onReceipt(await api('exchange.get_receipt', { invoice: name })); } catch (err) { setMsg(err.message); }
+  }
   const chosen = inv ? inv.lines.filter((l) => sel[l.row] && sel[l.row].qty > 0) : [];
   const hasPromo = chosen.some((l) => l.promo);
   const effMode = hasPromo ? 'credit' : mode;
@@ -62,10 +66,11 @@ export default function Returns({ L, branch, onReceipt, onExchange }) {
         </form>
         {msg && <div className="msg" data-testid="ret-msg">{msg}</div>}
         {results && (results.length ? (
-          <table><thead><tr><th>{L('invoice')}</th><th>{L('date')}</th><th>{L('customer')}</th><th>{L('total')}</th></tr></thead>
+          <table><thead><tr><th>{L('invoice')}</th><th>{L('date')}</th><th>{L('customer')}</th><th>{L('total')}</th><th></th></tr></thead>
             <tbody>{results.map((r) => (
               <tr key={r.name} data-testid="inv-row" onClick={() => pick(r.name)} style={{ cursor: 'pointer' }}>
-                <td>{r.name}</td><td>{r.posting_date}</td><td>{r.customer_name}</td><td>{fmt(r.grand_total)}</td></tr>))}</tbody></table>
+                <td>{r.name}</td><td>{r.posting_date}</td><td>{r.customer_name}</td><td>{fmt(r.grand_total)}</td>
+                <td><button data-testid="inv-reprint" onClick={(e) => { e.stopPropagation(); reprint(r.name); }}>{L('reprint')}</button></td></tr>))}</tbody></table>
         ) : <p className="muted">{L('noResults')}</p>)}
         {done && (
           <div className="card ok-box" data-testid="ret-done">
