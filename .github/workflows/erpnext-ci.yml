@@ -51,7 +51,7 @@ jobs:
         run: |
           cd frontend && npm install && npm run build && cd ..
           cd ~/bench
-          cp -r $GITHUB_WORKSPACE/orbit_pos/public/pos apps/orbit_pos/orbit_pos/public/ 2>/dev/null || true
+          test -f apps/orbit_pos/orbit_pos/public/pos/index.html && echo "UI bundle present in app" || { echo "UI bundle MISSING"; exit 1; }
           bench --site test_site execute orbit_pos.tests.ci_seed.run
           sed -i '/redis/d;/watch/d;/socketio/d' Procfile
           bench build > /tmp/build.log 2>&1 || tail -20 /tmp/build.log
