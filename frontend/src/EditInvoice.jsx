@@ -21,7 +21,7 @@ export default function EditInvoice({ L, fmt, perms, onReceipt }) {
   async function save() {
     const lines = inv.lines_locked ? inv.lines.map((l) => ({ itemId: l.itemId, qty: l.qty, price: l.price })) : inv.lines.map((l, i) => ({ itemId: l.itemId, qty: Number(qty[i]), price: l.price })).filter((l) => l.qty > 0);
     const payments = [{ method: 'Cash', amount: Number(cash) || 0 }, { method: 'Credit Card', amount: Number(card) || 0, ref }].filter((p) => p.amount > 0);
-    try { const r = await api('sales.edit_invoice', { invoice: inv.invoice, payload: JSON.stringify({ lines, payments }), reason, ...approver() }); setMsg(L('edited') + ' ' + r.sales_invoice); setInv(null); setRes([]); onReceipt && onReceipt(r.sales_invoice); }
+    try { const r = await api('sales.edit_invoice', { invoice: inv.invoice, payload: JSON.stringify({ lines, payments }), reason, ...approver() }); setMsg(L('edited') + ' ' + r.sales_invoice); setInv(null); setRes([]); if (onReceipt) onReceipt(await api('exchange.get_receipt', { invoice: r.sales_invoice })); }
     catch (e) { setMsg(e.message); }
   }
   async function voidIt() { try { await api('sales.void_invoice', { invoice: inv.invoice, reason, ...approver() }); setMsg(L('voided')); setInv(null); setRes([]); } catch (e) { setMsg(e.message); } }

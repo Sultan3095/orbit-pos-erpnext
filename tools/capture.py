@@ -204,6 +204,7 @@ with sync_playwright() as p:
         fr.get_by_test_id("receipt-modal").wait_for(timeout=20000)
         rt = fr.get_by_test_id("receipt-sheet").inner_text()
         assert "AUTH-778899" in rt, "card reference missing on the revised receipt: " + rt[:300]
+        assert fr.get_by_test_id("r-rev").count() == 1, "revised marker missing on the receipt"
         cap(page, "اتعملت نسخة معدّلة مرتبطة بالأصل"); shot(page, "web-edit-saved")
     except Exception as e:
         log.append(("approve-edit-flow", "FAIL " + str(e)[:300]))

@@ -136,7 +136,7 @@ def get_receipt(invoice):
            "customer": WALKIN_AR if is_walkin else si.customer_name, "customer_en": WALKIN_EN if is_walkin else si.customer_name,
            "lines": lines, "net_total": flt(si.net_total), "discount": flt(si.discount_amount),
            "taxes": [{"name": t.description, "amount": flt(t.tax_amount)} for t in si.taxes],
-           "grand_total": flt(si.grand_total), "payments": pays,
+           "grand_total": flt(si.grand_total), "payments": pays, "rev": int(si.get("orbit_rev") or 0),
            "format": (prof.get("orbit_return_receipt_format") if si.is_return else prof.get("orbit_sale_receipt_format")) if prof else "Standard 80mm",
            "window_days": int(s.return_window_days or 0), "terms_ar": s.receipt_terms_ar or "", "terms_en": s.receipt_terms_en or "",
            "exchange_receipt": None}
