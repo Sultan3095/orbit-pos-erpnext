@@ -46,3 +46,22 @@ jobs:
           bench --site test_site set-config allow_tests true
           bench --site test_site execute orbit_pos.tests.ci_setup.run
           bench --site test_site run-tests --app orbit_pos
+      - name: UI capture (screenshots and walkthrough video)
+        continue-on-error: true
+        run: |
+          cd frontend && npm install && npm run build && cd ..
+          cd ~/bench
+          cp -r $GITHUB_WORKSPACE/orbit_pos/public/pos apps/orbit_pos/orbit_pos/public/ 2>/dev/null || true
+          bench --site test_site execute orbit_pos.tests.ci_seed.run
+          sed -i '/redis/d;/watch/d;/socketio/d' Procfile
+          bench build --app orbit_pos > /tmp/build.log 2>&1 || tail -20 /tmp/build.log
+          (bench start > /tmp/bench-start.log 2>&1 &)
+          for i in $(seq 1 60); do curl -sf localhost:8000/api/method/ping && break; sleep 3; done
+          pip install playwright && playwright install --with-deps chromium
+          python $GITHUB_WORKSPACE/tools/capture.py $GITHUB_WORKSPACE/out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: orbit-erpnext-${{ matrix.name }}-ui
+          path: out/
+          if-no-files-found: ignore

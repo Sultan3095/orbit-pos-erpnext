@@ -7,6 +7,12 @@ from .common import require_pos_user, verify_manager_pin, log_approval, settings
 def open_shift(pos_profile, opening_cash=0, terminal=None, shared=0, branch=None):
     """One open shift per user. With shared=1, other terminals can join the same shift by passing its name to join_shift."""
     require_pos_user()
+    if not frappe.db.exists("POS Profile", pos_profile):
+        # the UI has no profile picker yet: fall back to the only enabled profile
+        profiles = frappe.get_all("POS Profile", filters={"disabled": 0}, pluck="name")
+        if len(profiles) != 1:
+            frappe.throw(frappe._("POS Profile {0} not found").format(pos_profile))
+        pos_profile = profiles[0]
     existing = frappe.db.get_value("POS Shift", {"user": frappe.session.user, "status": "Open"}, "name")
     if existing:
         frappe.throw(frappe._("You already have an open shift: {0}").format(existing))
