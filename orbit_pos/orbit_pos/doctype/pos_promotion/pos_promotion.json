@@ -1,0 +1,152 @@
+{
+ "doctype": "DocType",
+ "name": "POS Promotion",
+ "module": "Orbit POS",
+ "custom": 0,
+ "issingle": 0,
+ "istable": 0,
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "fields": [
+  {
+   "fieldname": "promo_name",
+   "fieldtype": "Data",
+   "label": "Promo Name",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "default": "1"
+  },
+  {
+   "fieldname": "promo_type",
+   "fieldtype": "Select",
+   "label": "Promo Type",
+   "options": "percent\namount\nbxgy\nbundle\ninvoice_pct\ninvoice_amt",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "scope_type",
+   "fieldtype": "Select",
+   "label": "Scope Type",
+   "options": "All\nItem\nItem Group",
+   "default": "All"
+  },
+  {
+   "fieldname": "scope_item",
+   "fieldtype": "Link",
+   "label": "Scope Item",
+   "options": "Item",
+   "depends_on": "eval:doc.scope_type=='Item'"
+  },
+  {
+   "fieldname": "scope_item_group",
+   "fieldtype": "Link",
+   "label": "Scope Item Group",
+   "options": "Item Group",
+   "depends_on": "eval:doc.scope_type=='Item Group'"
+  },
+  {
+   "fieldname": "percent",
+   "fieldtype": "Percent",
+   "label": "Percent"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "label": "Amount"
+  },
+  {
+   "fieldname": "buy_qty",
+   "fieldtype": "Int",
+   "label": "Buy Qty"
+  },
+  {
+   "fieldname": "get_qty",
+   "fieldtype": "Int",
+   "label": "Get Qty"
+  },
+  {
+   "fieldname": "get_discount_percent",
+   "fieldtype": "Percent",
+   "label": "Get Discount Percent",
+   "default": "100"
+  },
+  {
+   "fieldname": "bundle_qty",
+   "fieldtype": "Int",
+   "label": "Bundle Qty"
+  },
+  {
+   "fieldname": "bundle_price",
+   "fieldtype": "Currency",
+   "label": "Bundle Price"
+  },
+  {
+   "fieldname": "min_total",
+   "fieldtype": "Currency",
+   "label": "Min Total"
+  },
+  {
+   "fieldname": "start_date",
+   "fieldtype": "Date",
+   "label": "Start Date"
+  },
+  {
+   "fieldname": "end_date",
+   "fieldtype": "Date",
+   "label": "End Date"
+  },
+  {
+   "fieldname": "days",
+   "fieldtype": "Table",
+   "label": "Days",
+   "options": "POS Promotion Day"
+  },
+  {
+   "fieldname": "stackable",
+   "fieldtype": "Check",
+   "label": "Stackable"
+  },
+  {
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "label": "Priority",
+   "default": "0"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "POS Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "POS User",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "report": 1
+  },
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "autoname": "PROMO-.####",
+ "title_field": "promo_name"
+}

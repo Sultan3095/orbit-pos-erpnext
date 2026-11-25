@@ -1,0 +1,24 @@
+{
+ "doctype": "DocType",
+ "name": "POS Promotion Day",
+ "module": "Orbit POS",
+ "custom": 0,
+ "issingle": 0,
+ "istable": 1,
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "fields": [
+  {
+   "fieldname": "day_number",
+   "fieldtype": "Select",
+   "label": "Day Number",
+   "options": "0\n1\n2\n3\n4\n5\n6",
+   "in_list_view": 1,
+   "description": "0=Sunday"
+  }
+ ],
+ "permissions": [],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "track_changes": 0
+}

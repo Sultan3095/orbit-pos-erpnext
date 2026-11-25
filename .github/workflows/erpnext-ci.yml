@@ -1,0 +1,47 @@
+name: ERPNext 15 and 16
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: python -m unittest discover -s tests -t .
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: cd frontend && npm install && npm test && npm run build
+  bench:
+    needs: unit
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: v15, branch: version-15, python: '3.11', node: 18 }
+          - { name: v16, branch: version-16, python: '3.14', node: 24 }
+    name: ERPNext ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:10.6
+        env: { MYSQL_ROOT_PASSWORD: root }
+        ports: [3306:3306]
+        options: --health-cmd="mariadb-admin ping" --health-interval=5s --health-timeout=5s --health-retries=10
+      redis-cache: { image: 'redis:alpine', ports: ['13000:6379'] }
+      redis-queue: { image: 'redis:alpine', ports: ['11000:6379'] }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '${{ matrix.python }}' }
+      - uses: actions/setup-node@v4
+        with: { node-version: '${{ matrix.node }}' }
+      - run: |
+          pip install frappe-bench
+          bench init --skip-redis-config-generation --frappe-branch ${{ matrix.branch }} --skip-assets ~/bench
+          cd ~/bench
+          bench get-app --branch ${{ matrix.branch }} erpnext https://github.com/frappe/erpnext
+          bench get-app orbit_pos $GITHUB_WORKSPACE
+          bench setup requirements
+          bench new-site test_site --db-root-password root --admin-password admin --install-app erpnext --install-app orbit_pos
+          bench --site test_site set-config allow_tests true
+          bench --site test_site run-tests --app orbit_pos

@@ -1,0 +1,125 @@
+{
+ "doctype": "DocType",
+ "name": "Orbit POS Settings",
+ "module": "Orbit POS",
+ "custom": 0,
+ "issingle": 1,
+ "istable": 0,
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "fields": [
+  {
+   "fieldname": "return_window_days",
+   "fieldtype": "Int",
+   "label": "Return Window Days",
+   "default": "14",
+   "description": "0 = no limit"
+  },
+  {
+   "fieldname": "allow_cross_branch_returns",
+   "fieldtype": "Check",
+   "label": "Allow Cross Branch Returns",
+   "default": "0"
+  },
+  {
+   "fieldname": "cashier_max_discount_percent",
+   "fieldtype": "Percent",
+   "label": "Cashier Max Discount Percent",
+   "default": "10"
+  },
+  {
+   "fieldname": "currency_per_point",
+   "fieldtype": "Currency",
+   "label": "Currency Per Point",
+   "default": "10"
+  },
+  {
+   "fieldname": "value_per_point",
+   "fieldtype": "Currency",
+   "label": "Value Per Point",
+   "default": "0.5"
+  },
+  {
+   "fieldname": "barcode_prefix",
+   "fieldtype": "Data",
+   "label": "Barcode Prefix",
+   "default": "200"
+  },
+  {
+   "fieldname": "barcode_seq",
+   "fieldtype": "Int",
+   "label": "Barcode Seq",
+   "default": "0",
+   "read_only": 1
+  },
+  {
+   "fieldname": "receipt_language",
+   "fieldtype": "Select",
+   "label": "Receipt Language",
+   "options": "ar\nen",
+   "default": "ar"
+  },
+  {
+   "fieldname": "ui_language",
+   "fieldtype": "Select",
+   "label": "Ui Language",
+   "options": "ar\nen",
+   "default": "ar"
+  },
+  {
+   "fieldname": "default_theme",
+   "fieldtype": "Select",
+   "label": "Default Theme",
+   "options": "light\ndark\nblue",
+   "default": "light"
+  },
+  {
+   "fieldname": "eta_enabled",
+   "fieldtype": "Check",
+   "label": "Eta Enabled",
+   "default": "0"
+  },
+  {
+   "fieldname": "eta_environment",
+   "fieldtype": "Select",
+   "label": "Eta Environment",
+   "options": "Preprod\nProd",
+   "default": "Preprod"
+  },
+  {
+   "fieldname": "eta_note",
+   "fieldtype": "Small Text",
+   "label": "Eta Note",
+   "read_only": 1,
+   "default": "ETA credentials are never stored here in plain text. Use a vault/secret."
+  }
+ ],
+ "permissions": [
+  {
+   "role": "POS Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "POS User",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "report": 1
+  },
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "track_changes": 0
+}

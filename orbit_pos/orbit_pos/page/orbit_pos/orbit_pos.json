@@ -1,0 +1,2 @@
+{"doctype": "Page", "name": "orbit-pos", "page_name": "orbit-pos", "title": "Orbit POS", "module": "Orbit POS", "standard": "Yes", "system_page": 0,
+ "roles": [{"role": "POS User"}, {"role": "POS Manager"}, {"role": "System Manager"}]}
