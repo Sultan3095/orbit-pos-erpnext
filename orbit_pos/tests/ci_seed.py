@@ -40,6 +40,22 @@ def run():
     if not frappe.db.exists("POS Promotion", {"promo_name": "Buy 2 get 3 Chips"}):
         frappe.get_doc({"doctype": "POS Promotion", "promo_name": "Buy 2 get 3 Chips", "promo_type": "bxgy", "buy_qty": 2,
                         "get_qty": 3, "enabled": 1}).insert()
+    tf.enable_serial()
+    if not frappe.db.exists("Item", "Phone"):
+        frappe.get_doc({"doctype": "Item", "item_code": "Phone", "item_name": "Phone", "item_group": leaf("Item Group"),
+                        "stock_uom": "Nos", "is_stock_item": 1, "has_serial_no": 1, "valuation_rate": 50,
+                        "barcodes": [{"barcode": "6230"}]}).insert()
+        frappe.get_doc({"doctype": "Item Price", "item_code": "Phone", "price_list": "Standard Selling",
+                        "price_list_rate": 100, "selling": 1}).insert()
+        se = frappe.get_doc({"doctype": "Stock Entry", "stock_entry_type": "Material Receipt", "company": co,
+                             "items": [{"item_code": "Phone", "qty": 4, "t_warehouse": tf.WH, "basic_rate": 50,
+                                        "use_serial_batch_fields": 1, "serial_no": "PH-1\nPH-2\nPH-3\nPH-4"}]})
+        se.insert(); se.submit()
+    st = frappe.get_doc("Orbit POS Settings")
+    st.return_window_days = 7          # the receipt must print THIS value
+    st.receipt_terms_ar = "الاستبدال خلال المدة المحددة بشرط سلامة المنتج وإحضار الفاتورة"
+    st.receipt_terms_en = "Exchange within the stated period, item in original condition, invoice required."
+    st.save()
     from orbit_pos.api import sales, shift
     # an earlier closed shift with sales, a return, a cash movement and a manager approval, so lists are not empty
     sh = shift.open_shift(name, 100)["name"]

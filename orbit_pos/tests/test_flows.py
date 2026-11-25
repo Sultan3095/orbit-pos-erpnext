@@ -35,6 +35,12 @@ def make_item(code, price, barcode=None, qty=100, **extra):
     return code
 
 
+def enable_serial():
+    """v16 hides serial numbers behind a Stock Settings switch; v15 has no such field."""
+    if frappe.get_meta("Stock Settings").has_field("enable_serial_and_batch_no_for_item"):
+        frappe.db.set_single_value("Stock Settings", "enable_serial_and_batch_no_for_item", 1)
+
+
 def stock(code):
     return flt(frappe.db.get_value("Bin", {"item_code": code, "warehouse": WH}, "actual_qty"))
 
@@ -305,6 +311,7 @@ class TestFlows(Base):
 
     def test_18_serial_item_partial_return_selects_serials(self):
         from orbit_pos.api import sales, exchange
+        enable_serial()
         if not frappe.db.exists("Item", "ORB-SN"):
             frappe.get_doc({"doctype": "Item", "item_code": "ORB-SN", "item_name": "ORB-SN", "item_group": leaf("Item Group"),
                             "stock_uom": "Nos", "is_stock_item": 1, "has_serial_no": 1, "valuation_rate": 50}).insert()

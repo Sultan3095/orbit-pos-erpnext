@@ -55,6 +55,14 @@ with sync_playwright() as p:
         shot(page, "pos-open-shift", None, 500)
         fr.get_by_test_id("open").click(); time.sleep(3)
         log.append(("after-open-text", fr.locator("body").inner_text()[:400]))
+        cap(page, "العروض الشغالة النهارده ظاهرة فوق شاشة الكاشير")
+        assert fr.get_by_test_id("promo-chip").count() >= 1, "no active promo chip on the cashier screen"
+        shot(page, "pos-active-promos")
+        fr.get_by_test_id("cust-new").click(); fr.get_by_test_id("nc-name").fill("أحمد محمود"); fr.get_by_test_id("nc-phone").fill("01012345678")
+        fr.get_by_test_id("nc-save").click(); time.sleep(2)
+        assert "أحمد" in fr.get_by_test_id("customer-name").inner_text(), "customer not selected"
+        cap(page, "اختيار العميل من شاشة الكاشير (الافتراضي: عميل نقدي)")
+        shot(page, "pos-customer")
         cap(page, "الباركود أو الكود، وممكن تكتب 5*6221 لخمس وحدات")
         shot(page, "pos-ready")
         for code in ["5*6221", "6222", "6223"]:
@@ -65,6 +73,12 @@ with sync_playwright() as p:
         cap(page, "الدفع نقدي وبيحسب الباقي")
         shot(page, "pos-payment")
         fr.get_by_test_id("pay").click(); time.sleep(4)
+        cap(page, "فاتورة الطباعة: اسم العميل والشروط والأحكام من القالب")
+        fr.get_by_test_id("receipt-modal").wait_for(); time.sleep(1)
+        rtxt = fr.get_by_test_id("receipt-sheet").inner_text()
+        assert "أحمد محمود" in rtxt and "Terms" not in "" and "الاستبدال" in rtxt, "sale receipt missing customer or terms: " + rtxt[:300]
+        shot(page, "pos-receipt-sale", None, 800)
+        fr.get_by_test_id("receipt-close").click(); time.sleep(0.5)
         cap(page, "تمت العملية وأصبحت فاتورة مبيعات في ERPNext")
         shot(page, "pos-after-pay")
         fr.get_by_test_id("lang").select_option("en"); time.sleep(1)
@@ -74,6 +88,61 @@ with sync_playwright() as p:
         cap(page, "Dark theme")
         shot(page, "pos-dark")
         fr.get_by_test_id("theme").select_option("light"); fr.get_by_test_id("lang").select_option("ar")
+        # ---- returns / exchange, all from the POS screen
+        fr.get_by_test_id("tab-returns").click(); time.sleep(1)
+        fr.get_by_test_id("ret-search").fill("أحمد"); fr.get_by_test_id("ret-find").click(); time.sleep(2)
+        cap(page, "المرتجعات: البحث عن الفاتورة بالاسم أو التليفون أو السيريال"); shot(page, "ret-search")
+        fr.get_by_test_id("inv-row").first.click(); time.sleep(2)
+        cap(page, "بنود الفاتورة والمتبقي للإرجاع. بند العرض: استبدال فقط")
+        shot(page, "ret-invoice")
+        fr.get_by_test_id("ret-qty-0").fill("1"); time.sleep(1)
+        assert fr.get_by_test_id("mode-refund").is_disabled(), "refund must be disabled for a promo line"
+        cap(page, "الاسترداد النقدي متقفل لأن البند عليه عرض"); shot(page, "ret-promo-exchange-only")
+        fr.get_by_test_id("ret-confirm").click(); fr.get_by_test_id("receipt-modal").wait_for(); time.sleep(1.5)
+        rt = fr.get_by_test_id("receipt-sheet").inner_text()
+        assert "7" in fr.get_by_test_id("r-window").inner_text(), "window on receipt is not the configured 7: " + rt
+        assert "EXR-" in rt and "1.60" in rt, "exchange receipt missing: " + rt
+        cap(page, "إشعار الاستبدال مطبوع: القيمة والصلاحية من الإعدادات (7 أيام) والباركود")
+        shot(page, "ret-exchange-receipt", None, 800)
+        fr.get_by_test_id("receipt-close").click(); time.sleep(0.5)
+        xr_no = fr.get_by_test_id("ret-receipt-no").inner_text()
+        shot(page, "ret-done", "تم إصدار إشعار الاستبدال " + xr_no)
+        fr.get_by_test_id("ret-use-now").click(); time.sleep(1.5)
+        assert fr.get_by_test_id("xr-applied").count() == 1, "exchange credit not applied"
+        fr.get_by_test_id("scan").fill("6222"); fr.get_by_test_id("scan").press("Enter"); time.sleep(1.5)
+        fr.get_by_test_id("cash").fill("11"); time.sleep(1)
+        cap(page, "الاستبدال في نفس اللحظة: رصيد الإشعار 1.60 + كاش 11 لعصير 12")
+        shot(page, "exchange-cart")
+        fr.get_by_test_id("pay").click(); fr.get_by_test_id("receipt-modal").wait_for(); time.sleep(1.5)
+        assert "1.60" in fr.get_by_test_id("receipt-sheet").inner_text(), "credit not shown on the sale receipt"
+        shot(page, "exchange-sale-receipt", "فاتورة البيع الجديدة بعد الاستبدال", 800)
+        fr.get_by_test_id("receipt-close").click(); time.sleep(0.5)
+        # a serial-numbered sale and a partial serial return
+        fr.get_by_test_id("scan").fill("6230"); fr.get_by_test_id("scan").press("Enter"); time.sleep(1.5)
+        fr.get_by_test_id("serial-input").fill("PH-1, PH-2"); time.sleep(1.5)
+        fr.get_by_test_id("cash").fill("200"); time.sleep(1)
+        cap(page, "بيع صنف بسيريال: السيريالات بتتكتب أو بتتمسح على السطر")
+        shot(page, "serial-sale")
+        fr.get_by_test_id("pay").click(); fr.get_by_test_id("receipt-modal").wait_for(); time.sleep(1.5)
+        assert "PH-1" in fr.get_by_test_id("receipt-sheet").inner_text(), "serials missing on the receipt"
+        shot(page, "serial-sale-receipt", None, 800)
+        fr.get_by_test_id("receipt-close").click(); time.sleep(0.5)
+        fr.get_by_test_id("tab-returns").click(); time.sleep(0.5)
+        fr.get_by_test_id("ret-search").fill("PH-1"); fr.get_by_test_id("ret-find").click(); time.sleep(2)
+        fr.get_by_test_id("inv-row").first.click(); time.sleep(2)
+        fr.get_by_test_id("serial-PH-1").check(); time.sleep(1)
+        fr.get_by_test_id("mode-refund").check(); time.sleep(0.5)
+        cap(page, "مرتجع جزئي: اختيار سيريال واحد (PH-1) واسترداد نقدي"); shot(page, "serial-return-pick")
+        fr.get_by_test_id("ret-confirm").click(); fr.get_by_test_id("receipt-modal").wait_for(); time.sleep(1.5)
+        rt = fr.get_by_test_id("receipt-sheet").inner_text()
+        assert "100.00" in rt, "serial refund receipt: " + rt
+        shot(page, "serial-return-receipt", "إيصال المرتجع (رجوع PH-1 فقط)", 800)
+        fr.get_by_test_id("receipt-close").click(); time.sleep(0.5)
+        fr.get_by_test_id("ret-search").fill("PH-1"); fr.get_by_test_id("ret-find").click(); time.sleep(2)
+        fr.get_by_test_id("inv-row").first.click(); time.sleep(2)
+        assert fr.get_by_test_id("serial-PH-1").count() == 0 and fr.get_by_test_id("serial-PH-2").count() == 1, "returned serial still offered"
+        cap(page, "PH-1 اتسجل مرتجع ومش بيظهر تاني. PH-2 بس المتاح"); shot(page, "serial-return-blocked")
+        fr.get_by_test_id("tab-sale").click(); time.sleep(1)
         # petty cash: the cashier takes 50 from the drawer for bags from the supermarket
         fr.get_by_test_id("cash-out").click(); fr.get_by_test_id("cm-amount").fill("50")
         cap(page, "عهدة: الكاشير بياخد 50 جنيه من الدرج. السبب إجباري"); shot(page, "pos-cashout-dialog", None, 500)
@@ -82,11 +151,13 @@ with sync_playwright() as p:
         if fr.get_by_test_id("cm-save").count():
             fr.get_by_test_id("cm-save").click(); time.sleep(2)
         cap(page, "اتسجلت حركة السحب على الوردية"); shot(page, "pos-cashout-saved")
-        fr.get_by_test_id("counted").fill("75")
+        fr.get_by_test_id("counted").fill("185.4")
         cap(page, "إغلاق الشيفت بالعد الفعلي للكاش")
         fr.get_by_test_id("close").click(); time.sleep(2)
         cap(page, "تقرير الإغلاق: المتوقع والفعلي والفرق")
         shot(page, "pos-z-report")
+        zt = fr.get_by_test_id("z").inner_text()
+        assert "0.00" in zt.split("/")[-1] and "185.40" in zt, "Z report does not balance: " + zt
     except Exception as e:
         log.append(("pos-flow", "FAIL " + str(e)[:200]))
         shot(page, "pos-flow-failure")

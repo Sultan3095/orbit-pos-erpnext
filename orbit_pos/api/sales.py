@@ -226,7 +226,7 @@ def ensure_credit_mode(company):
                 frappe.db.get_value("Account", {"company": company, "root_type": "Liability", "is_group": 1}, "name")
             acc = frappe.get_doc({"doctype": "Account", "account_name": "Exchange Credits", "company": company,
                                   "parent_account": parent, "is_group": 0, "root_type": "Liability",
-                                  "account_type": ""}).insert(ignore_permissions=True).name
+                                  "account_type": "Bank"}).insert(ignore_permissions=True).name
         mop.append("accounts", {"company": company, "default_account": acc})
         mop.save(ignore_permissions=True)
     return CREDIT_MODE

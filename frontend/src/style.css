@@ -12,3 +12,17 @@ form { display:flex; gap:8px; } form input { flex:1; } table { width:100%; borde
 .promo { color:var(--accent); } .msg { margin-top:8px; color:var(--accent); } a { color:var(--accent); }
 .display { min-height:100vh; padding:40px; background:var(--bg); color:var(--fg); } .display .big { font-size:56px; margin-top:24px; } .display td { font-size:28px; }
 @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+.tabs button { margin-inline-end: 6px; } .tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.promos { margin-bottom: 12px; } .promos span { display:inline-block; margin:2px 6px 2px 0; padding:3px 10px; border-radius:999px; background:var(--accent); color:#fff; font-size:13px; }
+.ok-box { border-color: var(--ok); margin-top: 12px; } .picker { position:relative; } .picker .drop { position:absolute; z-index:5; background:var(--card); border:1px solid var(--line); border-radius:8px; width:100%; max-height:220px; overflow:auto; }
+.picker .drop div { padding:6px 10px; cursor:pointer; } .picker .drop div:hover { background:var(--bg); }
+.receipt-overlay { position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,.55); overflow:auto; padding:16px; }
+.receipt-tools { display:flex; gap:8px; justify-content:center; margin-bottom:10px; }
+.receipt-sheet { width:302px; margin:0 auto; background:#fff; color:#000; padding:10px 12px; font:13px/1.35 "Segoe UI", Tahoma, sans-serif; }
+.receipt-sheet.compact { font-size:12px; line-height:1.2; }
+.receipt-sheet table { width:100%; margin:0; } .receipt-sheet td { border:0; padding:1px 0; }
+.r-center { text-align:center; } .r-title { font-size:17px; font-weight:700; } .r-sub { font-weight:700; margin:4px 0; } .r-small { font-size:11px; }
+.r-row { display:flex; justify-content:space-between; gap:8px; } .r-total { font-size:16px; border-top:1px dashed #000; margin-top:4px; padding-top:4px; }
+.r-end { text-align:end; } .r-box { border:1px dashed #000; padding:6px; margin:8px 0; } .r-terms { margin-top:8px; font-size:11px; border-top:1px dashed #000; padding-top:6px; white-space:pre-wrap; }
+@media print { body * { visibility:hidden; } .receipt-sheet, .receipt-sheet * { visibility:visible; } .receipt-overlay { position:static; background:none; padding:0; }
+  .receipt-sheet { position:absolute; left:0; top:0; width:80mm; margin:0; } .no-print { display:none; } @page { size:80mm auto; margin:2mm; } }
