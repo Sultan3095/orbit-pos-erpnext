@@ -187,9 +187,14 @@ class TestFlows(Base):
             shift.cash_movement(sh, "Out", 300, "x")
         m = shift.cash_movement(sh, "Out", 300, "x", manager="boss@orbit.test", pin="4321")
         self.assertEqual(m["approved_by"], "boss@orbit.test")
-        z = shift.close_shift(sh, 150)
-        self.assertEqual(flt(z["expected_cash"]), 150.0)    # 500 - 50 - 300
-        self.assertEqual(flt(z["difference"]), 0.0)
+        z = shift.close_shift(sh, 150)                       # cashier closes BLIND: nothing about expected is returned
+        self.assertTrue(z["pending"]); self.assertNotIn("expected_cash", z)
+        frappe.set_user("boss@orbit.test")
+        v = shift.pending_close_view(sh)
+        self.assertEqual(flt(v["expected_cash"]), 150.0)     # 500 - 50 - 300
+        self.assertEqual(flt(v["difference"]), 0.0)
+        zz = shift.approve_close(sh)
+        self.assertEqual(flt(zz["expected_cash"]), 150.0); self.assertEqual(flt(zz["difference"]), 0.0)
 
     def test_10_one_open_shift_per_user(self):
         self._shift()
@@ -354,3 +359,131 @@ class TestFlows(Base):
         self.assertIn("b2g3", [p["name"] for p in exchange.active_promotions()])
         self.assertTrue(exchange.search_invoices(r["sales_invoice"]))
         self.assertTrue(exchange.search_invoices("Ahmed"))
+
+
+    # ---- roles, blind close, reopen, edit, void, cost
+    def _user(self, email, roles):
+        if not frappe.db.exists("User", email):
+            frappe.get_doc({"doctype": "User", "email": email, "first_name": email.split("@")[0], "send_welcome_email": 0,
+                            "roles": [{"role": r} for r in roles]}).insert()
+        return email
+
+    def test_20_permission_matrix_defaults_and_overrides(self):
+        from orbit_pos.api import common
+        self.assertEqual(common.perm("seeCost", "boss@orbit.test"), "N")        # manager sees no cost
+        self.assertEqual(common.perm("reports", "boss@orbit.test"), "Y")
+        self.assertEqual(common.perm("importPurchases", "boss@orbit.test"), "N")
+        self.assertEqual(common.perm("discountAbove", "cashier@orbit.test"), "A")
+        self.assertEqual(common.perm("seeExpected", "cashier@orbit.test"), "N")
+        self.assertEqual(common.perm("seeCost", "Administrator"), "Y")
+        st = frappe.get_doc("Orbit POS Settings"); old = st.get("permissions_json")
+        st.permissions_json = json.dumps({"cashier": {"priceOverride": "Y"}, "manager": {"seeCost": "Y"}}); st.save()
+        frappe.clear_cache()
+        try:
+            self.assertEqual(common.perm("priceOverride", "cashier@orbit.test"), "Y")
+            self.assertEqual(common.perm("seeCost", "boss@orbit.test"), "Y")
+        finally:
+            st.permissions_json = old or ""; st.save(); frappe.clear_cache()
+
+    def test_21_cashier_cannot_import_purchases_and_manager_cannot_either(self):
+        from orbit_pos.api import purchase_import
+        fn = lambda *_: purchase_import.import_supplier_invoice('/x.xlsx', 's', 'b', nowdate(), WH, CO)
+        for u in ("cashier@orbit.test", "boss@orbit.test"):
+            frappe.set_user(u)
+            with self.assertRaises(frappe.PermissionError):
+                fn("x")
+
+    def test_22_two_users_have_independent_shifts(self):
+        from orbit_pos.api import shift, sales
+        c2 = self._user("cashier2@orbit.test", ["POS User", "Sales User", "Stock User", "Accounts User"])
+        frappe.set_user("cashier@orbit.test"); s1 = self._shift(100)
+        frappe.set_user(c2); s2 = self._shift(200)
+        self.assertNotEqual(s1, s2)
+        sales.submit_sale(self._payload(s2, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 10))
+        frappe.set_user("cashier@orbit.test")
+        with self.assertRaises(frappe.PermissionError):                 # cannot sell into the other user's shift
+            sales.submit_sale(self._payload(s2, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 10))
+        self.assertEqual(flt(shift.expected_cash(s1)), 100.0)
+        self.assertEqual(flt(shift.expected_cash(s2)), 210.0)
+        shift.close_shift(s1, 100)                                      # closing one does not touch the other
+        self.assertEqual(frappe.db.get_value("POS Shift", s2, "status"), "Open")
+
+    def test_23_blind_close_needs_manager_and_not_self(self):
+        from orbit_pos.api import shift, sales
+        frappe.set_user("cashier@orbit.test"); sh = self._shift(100)
+        sales.submit_sale(self._payload(sh, [{"itemId": "ORB-A", "qty": 2, "price": 10}], 20))
+        r = shift.close_shift(sh, 115)
+        self.assertTrue(r["pending"])
+        self.assertEqual(frappe.db.get_value("POS Shift", sh, "approval_status"), "Pending")
+        self.assertIsNone(frappe.db.get_value("POS Shift", sh, "expected_cash"))
+        z = shift.z_report(sh); self.assertIsNone(z["expected_cash"]); self.assertIsNone(z["difference"])
+        with self.assertRaises(frappe.PermissionError):                 # a cashier may not look or approve
+            shift.pending_close_view(sh)
+        with self.assertRaises(frappe.PermissionError):
+            shift.approve_close(sh)
+        shift.pending_close_view(sh, manager="boss@orbit.test", pin="4321")     # PIN of a manager works from the cashier's screen
+        with self.assertRaises(frappe.PermissionError):
+            shift.approve_close(sh, manager="boss@orbit.test", pin="0000")
+        frappe.set_user("boss@orbit.test")
+        v = shift.pending_close_view(sh)
+        self.assertEqual(flt(v["expected_cash"]), 120.0); self.assertEqual(flt(v["difference"]), -5.0)
+        with self.assertRaises(frappe.ValidationError):                 # difference needs a note
+            shift.approve_close(sh)
+        z = shift.approve_close(sh, note="counted twice, 5 short")
+        self.assertEqual(flt(z["expected_cash"]), 120.0); self.assertEqual(flt(z["difference"]), -5.0)
+        self.assertEqual(frappe.db.get_value("POS Shift", sh, "approved_by"), "boss@orbit.test")
+        with self.assertRaises(frappe.ValidationError):
+            shift.approve_close(sh, note="again")
+
+    def test_24_closed_shift_cannot_be_voided_or_edited_until_reopened(self):
+        from orbit_pos.api import shift, sales
+        sh = self._shift(100)
+        r = sales.submit_sale(self._payload(sh, [{"itemId": "ORB-A", "qty": 2, "price": 10}], 20)); inv = r["sales_invoice"]
+        shift.close_shift(sh, 120)
+        with self.assertRaises(frappe.ValidationError):
+            sales.void_invoice(inv, "mistake")
+        with self.assertRaises(frappe.ValidationError):
+            sales.edit_invoice(inv, json.dumps({"lines": [{"itemId": "ORB-A", "qty": 1, "price": 10}], "payments": [{"method": "Cash", "amount": 10}]}), "x")
+        with self.assertRaises(frappe.ValidationError):                 # not even a direct cancel from the desk
+            frappe.get_doc("Sales Invoice", inv).cancel()
+        shift.reopen_shift(sh, "wrong quantity")
+        self.assertEqual(frappe.db.get_value("POS Shift", sh, "status"), "Open")
+        self.assertEqual(frappe.db.get_value("POS Shift", sh, "reopen_count"), 1)
+        before = stock("ORB-A")
+        e = sales.edit_invoice(inv, json.dumps({"lines": [{"itemId": "ORB-A", "qty": 3, "price": 10}], "payments": [{"method": "Cash", "amount": 30}]}), "customer took 3")
+        self.assertEqual(frappe.db.get_value("Sales Invoice", inv, "docstatus"), 2)         # original cancelled, kept for audit
+        new = frappe.get_doc("Sales Invoice", e["sales_invoice"])
+        self.assertEqual(new.orbit_revision_of, inv); self.assertEqual(new.orbit_rev, 1); self.assertEqual(flt(new.grand_total), 30.0)
+        self.assertEqual(stock("ORB-A"), before - 1)                                         # 2 back, 3 out
+        self.assertEqual(flt(shift.expected_cash(sh)), 130.0)
+        v = sales.void_invoice(e["sales_invoice"], "customer cancelled")
+        self.assertEqual(v["status"], "voided"); self.assertEqual(stock("ORB-A"), before + 2)
+        self.assertEqual(flt(shift.expected_cash(sh)), 100.0)
+        z = shift.close_shift(sh, 100); self.assertEqual(flt(z["difference"]), 0.0)
+
+    def test_25_edit_blocked_with_returns_and_cashier_needs_manager_pin(self):
+        from orbit_pos.api import shift, sales
+        frappe.set_user("cashier@orbit.test"); sh = self._shift(100)
+        r = sales.submit_sale(self._payload(sh, [{"itemId": "ORB-A", "qty": 2, "price": 10}], 20)); inv = r["sales_invoice"]
+        pl = json.dumps({"lines": [{"itemId": "ORB-A", "qty": 1, "price": 10}], "payments": [{"method": "Cash", "amount": 10}]})
+        with self.assertRaises(frappe.PermissionError):
+            sales.edit_invoice(inv, pl, "x")
+        with self.assertRaises(frappe.PermissionError):
+            sales.edit_invoice(inv, pl, "x", manager="boss@orbit.test", pin="0000")
+        sales.create_return(inv, json.dumps([{"item_code": "ORB-A", "qty": 1}]))
+        with self.assertRaises(frappe.ValidationError):
+            sales.edit_invoice(inv, pl, "x", manager="boss@orbit.test", pin="4321")
+        with self.assertRaises(frappe.ValidationError):
+            sales.void_invoice(inv, "x", manager="boss@orbit.test", pin="4321")
+
+    def test_26_manager_cannot_read_item_cost(self):
+        frappe.set_user("Administrator")
+        mona = self._user("mona@orbit.test", ["POS Manager", "Sales User"])
+        frappe.set_user(mona)
+        doc = frappe.get_doc("Item", "ORB-A")
+        if not frappe.get_meta("Item").has_field("valuation_rate"):
+            self.skipTest("no valuation_rate field")
+        self.assertFalse(doc.has_permlevel_access_to("valuation_rate"))
+        self.assertTrue(doc.has_permlevel_access_to("item_name"))
+        frappe.set_user("Administrator")
+        self.assertTrue(frappe.get_doc("Item", "ORB-A").has_permlevel_access_to("valuation_rate"))

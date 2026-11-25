@@ -1,12 +1,13 @@
 import hashlib
 import json
+import json
 import frappe
 from frappe.utils import flt, nowdate, getdate, now_datetime
 from orbit_pos.logic.promotions import apply_promotions, r2
 from orbit_pos.logic.returns import return_allowed, refund_amount, cross_branch_allowed, credit_expiry, credit_expired, split_credit
 from orbit_pos.logic.loyalty import points_earned, redeem_value
 from orbit_pos.logic.barcodes import make_ean13, parse_scale_barcode
-from .common import require_pos_user, verify_manager_pin, log_approval, settings
+from .common import require_pos_user, verify_manager_pin, log_approval, settings, perm, can, approver_for
 
 
 def active_promotions():
@@ -77,7 +78,7 @@ def quote(payload):
 
 def _check_discount_authority(p, shift):
     """Cashiers may not exceed the configured discount percent without a manager PIN."""
-    if "POS Manager" in frappe.get_roles():
+    if perm("discountAbove") == "Y":
         return None
     limit = flt(settings().cashier_max_discount_percent)
     worst = 0
@@ -86,6 +87,8 @@ def _check_discount_authority(p, shift):
     if flt(p.get("inv_pct")) > worst:
         worst = flt(p.get("inv_pct"))
     if worst > limit:
+        if perm("discountAbove") == "N":
+            frappe.throw(frappe._("Your role may not give this discount"), frappe.PermissionError)
         mgr = verify_manager_pin(p.get("manager"), p.get("manager_pin"))
         log_approval(mgr, "Discount", p.get("txn_id"), f"{worst}% > {limit}%", shift)
         return mgr
@@ -182,7 +185,8 @@ def _submit_sale(payload):
         si.append("payments", {"mode_of_payment": ensure_credit_mode(prof.company), "amount": credit_used})
         paid += credit_used
     for pay in p["payments"]:
-        si.append("payments", {"mode_of_payment": pay["method"], "amount": flt(pay["amount"])})
+        si.append("payments", {"mode_of_payment": pay["method"], "amount": flt(pay["amount"]),
+                               "orbit_ref": (pay.get("ref") or "")[:60]})
         paid += flt(pay["amount"])
     if paid + 0.005 < si.grand_total:
         frappe.throw(frappe._("Payments {0} are less than total {1}").format(paid, si.grand_total))
@@ -312,7 +316,9 @@ def create_return(invoice, items, manager=None, pin=None, current_branch=None, m
     ok, needs_mgr = return_allowed(orig.posting_date, getdate(nowdate()), int(s.return_window_days or 0), manager_approved=False)
     approver = None
     if needs_mgr:
-        if "POS Manager" in frappe.get_roles():
+        if perm("returnAfterWindow") == "N":
+            frappe.throw(frappe._("Your role may not return after the window"), frappe.PermissionError)
+        if can("returnAfterWindow"):
             approver = frappe.session.user
         else:
             approver = verify_manager_pin(manager, pin)
@@ -398,3 +404,72 @@ def guard_invoice(doc, method=None):
     if doc.get("orbit_shift") and not doc.is_return:
         if frappe.db.get_value("POS Shift", doc.orbit_shift, "status") != "Open":
             frappe.throw(frappe._("Shift is closed"))
+
+
+def guard_cancel(doc, method=None):
+    """Hook: an invoice of a closed shift can never be cancelled or voided, from the POS or from the desk.
+    Reopen the shift close first (needs approval), edit or void, then close again."""
+    if doc.get("orbit_shift") and not doc.is_return:
+        if frappe.db.get_value("POS Shift", doc.orbit_shift, "status") != "Open":
+            frappe.throw(frappe._("The shift of this invoice is closed. Reopen the shift close first."))
+
+
+def _editable_invoice(invoice):
+    si = frappe.get_doc("Sales Invoice", invoice)
+    if si.docstatus != 1 or si.is_return or not si.orbit_shift:
+        frappe.throw(frappe._("This invoice cannot be edited or voided here"))
+    if frappe.db.get_value("POS Shift", si.orbit_shift, "status") != "Open":
+        frappe.throw(frappe._("The shift of this invoice is closed. Reopen the shift close first."))
+    if frappe.db.exists("Sales Invoice", {"return_against": invoice, "docstatus": 1}):
+        frappe.throw(frappe._("This invoice has returns. Edit is blocked."))
+    if frappe.db.exists("POS Exchange Receipt", {"redeemed_in": invoice}):
+        frappe.throw(frappe._("This invoice used an exchange receipt. Edit is blocked."))
+    return si
+
+
+def _reverse_loyalty(si):
+    rows = frappe.db.sql("select customer, coalesce(sum(points),0) from `tabLoyalty Ledger Entry` where sales_invoice=%s group by customer", si.name)
+    for cust, pts in rows:
+        if pts:
+            _ledger(cust, -int(pts), si.name, "reverse")
+
+
+@frappe.whitelist()
+def void_invoice(invoice, reason, manager=None, pin=None):
+    """Cancel an invoice of an OPEN shift (stock and accounts are reversed). Never works on a closed shift."""
+    require_pos_user()
+    if not (reason or "").strip():
+        frappe.throw(frappe._("Reason is required"))
+    si = _editable_invoice(invoice)
+    who = approver_for("voidInvoice", manager, pin)
+    log_approval(who, "Void Invoice", invoice, reason, si.orbit_shift)
+    _reverse_loyalty(si)
+    si.cancel()
+    return {"status": "voided", "invoice": invoice}
+
+
+@frappe.whitelist()
+def edit_invoice(invoice, payload, reason, manager=None, pin=None):
+    """Edit = revision. The old invoice is cancelled (stock and accounts reversed) and a new one is created from the
+    corrected payload (same shape as submit_sale, without txn_id), linked back with orbit_revision_of / orbit_rev.
+    Only for an OPEN shift. Blocked when the invoice has returns or used an exchange receipt."""
+    require_pos_user()
+    if not (reason or "").strip():
+        frappe.throw(frappe._("Reason is required"))
+    si = _editable_invoice(invoice)
+    who = approver_for("editInvoice", manager, pin)
+    p = frappe.parse_json(payload)
+    rev = int(si.get("orbit_rev") or 0) + 1
+    root = si.get("orbit_revision_of") or si.name
+    p["txn_id"] = f"{si.orbit_txn_id}-r{rev}"
+    p["shift"] = si.orbit_shift
+    p.setdefault("customer", si.customer)
+    log_approval(who, "Edit Invoice", invoice, reason, si.orbit_shift)
+    _reverse_loyalty(si)
+    si.cancel()
+    res = _submit_sale(json.dumps(p))
+    frappe.db.set_value("Sales Invoice", res["sales_invoice"], {"orbit_revision_of": root, "orbit_rev": rev, "orbit_edit_reason": reason},
+                        update_modified=False)
+    res["revision_of"] = invoice
+    res["rev"] = rev
+    return res

@@ -2,7 +2,7 @@
 import re
 import frappe
 from frappe.utils import flt, getdate, cint
-from .common import require_pos_user
+from .common import require_pos_user, require
 
 COLS = {
     "barcode": ["barcode", "code", "الباركود", "الكود", "باركود", "كود"],
@@ -83,6 +83,7 @@ def parse_rows(rows):
 @frappe.whitelist()
 def import_supplier_invoice(file_url, supplier, bill_no, bill_date, warehouse, company, dry_run=1):
     require_pos_user()
+    require("importPurchases")  # supplier invoices carry cost: system manager only by default
     import openpyxl
     from frappe.utils.file_manager import get_file_path
     wb = openpyxl.load_workbook(get_file_path(file_url), data_only=True)

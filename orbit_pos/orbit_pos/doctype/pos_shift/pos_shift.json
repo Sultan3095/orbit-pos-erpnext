@@ -86,6 +86,57 @@
    "fieldname": "notes",
    "fieldtype": "Small Text",
    "label": "Notes"
+  },
+  {
+   "fieldname": "approval_status",
+   "fieldtype": "Select",
+   "label": "Close approval",
+   "options": "\nAuto\nPending\nApproved",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "Close approved by",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approved_at",
+   "fieldtype": "Datetime",
+   "label": "Approved at",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approval_note",
+   "fieldtype": "Small Text",
+   "label": "Approval note",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sealed_expected",
+   "fieldtype": "Currency",
+   "label": "Sealed expected cash (blind close)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reopen_count",
+   "fieldtype": "Int",
+   "label": "Times reopened",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reopened_by",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "Reopened by",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reopen_reason",
+   "fieldtype": "Small Text",
+   "label": "Reopen reason",
+   "read_only": 1
   }
  ],
  "permissions": [

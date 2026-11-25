@@ -115,6 +115,18 @@
    "fieldname": "receipt_terms_en",
    "fieldtype": "Small Text",
    "label": "Terms (English)"
+  },
+  {
+   "fieldname": "permissions_section",
+   "fieldtype": "Section Break",
+   "label": "Permissions by role"
+  },
+  {
+   "fieldname": "permissions_json",
+   "fieldtype": "Code",
+   "options": "JSON",
+   "label": "Permission overrides (cashier / manager)",
+   "description": "Edited by the System Manager only. Empty = defaults."
   }
  ],
  "permissions": [
@@ -144,5 +156,26 @@
  ],
  "sort_field": "creation",
  "sort_order": "DESC",
- "track_changes": 0
+ "track_changes": 0,
+ "field_order": [
+  "return_window_days",
+  "allow_cross_branch_returns",
+  "cashier_max_discount_percent",
+  "cashier_cash_out_limit",
+  "currency_per_point",
+  "value_per_point",
+  "barcode_prefix",
+  "barcode_seq",
+  "receipt_language",
+  "ui_language",
+  "default_theme",
+  "eta_enabled",
+  "eta_environment",
+  "eta_note",
+  "terms_section",
+  "receipt_terms_ar",
+  "receipt_terms_en",
+  "permissions_section",
+  "permissions_json"
+ ]
 }

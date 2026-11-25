@@ -13,5 +13,5 @@ after_migrate = "orbit_pos.setup.install.after_install"
 app_include_js = []
 
 doc_events = {
-    "Sales Invoice": {"validate": "orbit_pos.api.sales.guard_invoice"},
+    "Sales Invoice": {"validate": "orbit_pos.api.sales.guard_invoice", "before_cancel": "orbit_pos.api.sales.guard_cancel"},
 }
