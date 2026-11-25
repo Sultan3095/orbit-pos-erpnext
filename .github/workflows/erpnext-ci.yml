@@ -44,4 +44,5 @@ jobs:
           bench setup requirements
           bench new-site test_site --db-root-password root --admin-password admin --install-app erpnext --install-app orbit_pos
           bench --site test_site set-config allow_tests true
-          bench --site test_site run-tests --app orbit_pos
+          bench --site test_site execute orbit_pos.tests.ci_setup.run
+          bench --site test_site run-tests --app orbit_pos --verbose
