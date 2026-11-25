@@ -15,9 +15,13 @@ except ImportError:
 CO, WH = "Orbit Test", "Stores - OT"
 
 
+def leaf(doctype):
+    return frappe.db.get_value(doctype, {"is_group": 0}, "name")
+
+
 def make_item(code, price, barcode=None, qty=100, **extra):
     if not frappe.db.exists("Item", code):
-        d = {"doctype": "Item", "item_code": code, "item_name": code, "item_group": "All Item Groups",
+        d = {"doctype": "Item", "item_code": code, "item_name": code, "item_group": leaf("Item Group"),
              "stock_uom": "Nos", "is_stock_item": 1, "valuation_rate": price / 2}
         d.update(extra)
         if barcode:
@@ -45,8 +49,8 @@ class TestFlows(Base):
         make_item("ORB-A", 10, "6221111111111")
         make_item("ORB-B", 4, "6222222222222")
         if not frappe.db.exists("Customer", "Orbit Walkin"):
-            frappe.get_doc({"doctype": "Customer", "customer_name": "Orbit Walkin", "customer_group": "All Customer Groups",
-                            "territory": "All Territories"}).insert()
+            frappe.get_doc({"doctype": "Customer", "customer_name": "Orbit Walkin", "customer_group": leaf("Customer Group"),
+                            "territory": leaf("Territory")}).insert()
         cash_acc = frappe.db.get_value("Mode of Payment Account", {"parent": "Cash", "company": CO}, "default_account")
         if not frappe.db.exists("POS Profile", "Orbit Test Profile"):
             frappe.get_doc({"doctype": "POS Profile", "name": "Orbit Test Profile", "company": CO, "customer": "Orbit Walkin",
@@ -182,7 +186,7 @@ class TestFlows(Base):
         import openpyxl
         from orbit_pos.api import purchase_import as pi
         if not frappe.db.exists("Supplier", "Orbit Supplier"):
-            frappe.get_doc({"doctype": "Supplier", "supplier_name": "Orbit Supplier", "supplier_group": "All Supplier Groups"}).insert()
+            frappe.get_doc({"doctype": "Supplier", "supplier_name": "Orbit Supplier", "supplier_group": leaf("Supplier Group")}).insert()
         wb = openpyxl.Workbook(); ws = wb.active
         ws.append(["الباركود", "الاسم", "الكمية", "التكلفة", "الخصم"])
         ws.append(["6229999999991", "Imported Item", 10, 5, 0])

@@ -104,7 +104,7 @@ def import_supplier_invoice(file_url, supplier, bill_no, bill_date, warehouse, c
         code = p["item_code"]
         if not code:
             it = frappe.get_doc({"doctype": "Item", "item_code": p["barcode"], "item_name": p["name"] or p["barcode"],
-                                 "item_group": "All Item Groups", "stock_uom": "Nos", "is_stock_item": 1,
+                                 "item_group": frappe.db.get_value("Item Group", {"is_group": 0}, "name"), "stock_uom": "Nos", "is_stock_item": 1,
                                  "has_serial_no": 1 if p["serials"] else 0, "has_batch_no": 1 if p["batch"] else 0,
                                  "create_new_batch": 1 if p["batch"] else 0,
                                  "barcodes": [{"barcode": p["barcode"]}]}).insert()
