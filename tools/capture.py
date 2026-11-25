@@ -39,7 +39,7 @@ with sync_playwright() as p:
     page.on("response", _on_resp)
     go(page, "/login")
     shot(page, "login", "Orbit POS على ERPNext: تسجيل الدخول")
-    page.fill("#login_email", "Administrator"); page.fill("#login_password", "admin"); page.click(".btn-login")
+    page.fill("#login_email", "Administrator"); page.fill("#login_password", "admin"); page.press("#login_password", "Enter")
     page.wait_for_url("**/app**", timeout=60000)
     shot(page, "desk-home", "الصفحة الرئيسية لـ ERPNext", 3000)
 
