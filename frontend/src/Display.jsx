@@ -2,13 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { t } from './i18n.js';
 // Customer-facing second screen. Open /orbit-pos#display on the second monitor.
 export default function Display() {
-  const [s, setS] = useState({ lines: [], total: 0, lang: 'ar', theme: 'light' });
+  const [s, setS] = useState({ lines: [], total: 0, lang: 'ar', theme: 'brand' });
   useEffect(() => {
     const ch = new BroadcastChannel('orbit-display');
     ch.onmessage = (e) => setS(e.data);
     return () => ch.close();
   }, []);
-  useEffect(() => { document.documentElement.dataset.theme = s.theme; document.documentElement.dir = s.lang === 'ar' ? 'rtl' : 'ltr'; }, [s]);
+  useEffect(() => { document.documentElement.dataset.theme = ['brand', 'galaxy', 'light', 'dark'].includes(s.theme) ? s.theme : 'brand'; document.documentElement.dir = s.lang === 'ar' ? 'rtl' : 'ltr'; }, [s]);
   return (
     <div className="display">
       <h1>{t(s.lang, 'app')}</h1>

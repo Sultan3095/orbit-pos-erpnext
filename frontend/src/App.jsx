@@ -12,11 +12,14 @@ import Coupons from './Coupons.jsx';
 const queue = createQueue(window.localStorage);
 const TERMINAL = localStorage.getItem('orbit_terminal') || (localStorage.setItem('orbit_terminal', 'T' + Math.random().toString(36).slice(2, 6)), localStorage.getItem('orbit_terminal'));
 const lastResult = {};   // txn_id -> server answer of the sale, used to print its receipt
+const THEMES = ['brand', 'galaxy', 'light', 'dark'];
+const normTheme = (v) => (v === 'blue' ? 'brand' : THEMES.includes(v) ? v : 'brand');   // the old blue theme is the brand theme now
 const fmt = (n) => (Math.round((n + Number.EPSILON) * 100) / 100).toFixed(2);
 
 export default function App() {
   const [lang, setLang] = useState(localStorage.getItem('orbit_lang') || 'ar');
-  const [theme, setTheme] = useState(localStorage.getItem('orbit_theme') || 'light');
+  const [theme, setTheme] = useState(normTheme(localStorage.getItem('orbit_theme')));
+  const [me, setMe] = useState('');
   const [shift, setShift] = useState(null);
   const [perms, setPerms] = useState({});
   const [cart, setCart] = useState([]);
@@ -53,9 +56,10 @@ export default function App() {
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
     document.documentElement.lang = lang; document.documentElement.dataset.theme = theme;
     localStorage.setItem('orbit_lang', lang); localStorage.setItem('orbit_theme', theme);
-  }, [lang, theme]);
+    if (me) localStorage.setItem('orbit_theme:' + me, theme);
+  }, [lang, theme, me]);
 
-  useEffect(() => { api('shift.my_permissions').then((r) => setPerms(r.perms || {})).catch(() => setPerms({})); }, []);
+  useEffect(() => { api('shift.my_permissions').then((r) => { setPerms(r.perms || {}); if (r.user) { setMe(r.user); setTheme(normTheme(r.theme || localStorage.getItem('orbit_theme:' + r.user) || localStorage.getItem('orbit_theme'))); } }).catch(() => setPerms({})); }, []);
   const refreshShift = useCallback(async () => { try { setShift(await api('shift.current_shift')); setOnline(true); } catch (e) { setOnline(false); } }, []);
   useEffect(() => { refreshShift(); }, [refreshShift]);
   useEffect(() => { if (shift) api('exchange.active_promotions').then(setPromos).catch(() => setPromos([])); }, [shift]);
@@ -197,8 +201,8 @@ export default function App() {
           {perms.approve === 'Y' && perms.seeExpected === 'Y' && <button className={view === 'approvals' ? 'on' : ''} onClick={() => setView('approvals')} data-testid="tab-approvals">{L('tabApprovals')}</button>}
         </span>
         <span className="sp" />
-        <label>{L('theme')} <select value={theme} onChange={(e) => setTheme(e.target.value)} data-testid="theme">
-          {['light', 'dark', 'blue'].map((x) => <option key={x} value={x}>{L(x)}</option>)}</select></label>
+        <label>{L('theme')} <select value={theme} onChange={(e) => { setTheme(e.target.value); api('shift.set_theme', { theme: e.target.value }).catch(() => {}); }} data-testid="theme">
+          {THEMES.map((x) => <option key={x} value={x}>{L(x)}</option>)}</select></label>
         <label>{L('lang')} <select value={lang} onChange={(e) => setLang(e.target.value)} data-testid="lang"><option value="ar">العربية</option><option value="en">English</option></select></label>
         <a href="#display" target="_blank" rel="noreferrer">{L('customerScreen')}</a>
       </header>

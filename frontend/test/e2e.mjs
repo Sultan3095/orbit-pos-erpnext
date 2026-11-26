@@ -10,6 +10,7 @@ try {
   const p = await b.newPage(); await p.setViewport({ width: 1200, height: 760 });
   const txt = (sel) => p.$eval(sel, (e) => e.textContent);
   await p.goto('http://localhost:4173/?mock=1'); await p.waitForSelector('[data-testid=noshift]');
+  assert.equal(await p.evaluate(() => document.documentElement.dataset.theme), 'brand');
   assert.equal(await p.evaluate(() => document.documentElement.dir), 'rtl');
   await p.screenshot({ path: OUT + '/1-noshift-ar.png' });
   await p.click('[data-testid=open]'); await p.waitForSelector('[data-testid=scan]');
@@ -20,9 +21,9 @@ try {
   await p.screenshot({ path: OUT + '/2-cart-promo-ar.png' });
   await p.type('[data-testid=cash]', '10'); await p.type('[data-testid=card]', '10');
   assert.equal(await p.$eval('[data-testid=pay]', (e) => e.disabled), false);
-  await p.select('[data-testid=lang]', 'en'); await p.select('[data-testid=theme]', 'blue');
+  await p.select('[data-testid=lang]', 'en'); await p.select('[data-testid=theme]', 'galaxy');
   assert.equal(await p.evaluate(() => document.documentElement.dir), 'ltr');
-  await p.screenshot({ path: OUT + '/3-blue-en.png' });
+  await p.screenshot({ path: OUT + '/3-galaxy-en.png' });
   await p.click('[data-testid=pay]'); await new Promise((r) => setTimeout(r, 600));
   assert.ok((await txt('[data-testid=msg]')).includes('Sale complete'));
   assert.equal((await txt('[data-testid=pending]')).trim().endsWith('0'), true, await txt('[data-testid=pending]'));

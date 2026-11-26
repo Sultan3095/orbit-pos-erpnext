@@ -194,7 +194,21 @@ def my_permissions():
     require_pos_user()
     from .common import role_of, matrix, DEFAULTS
     role = role_of()
-    return {"role": role, "perms": {k: perm(k) for k in DEFAULTS}}
+    return {"role": role, "perms": {k: perm(k) for k in DEFAULTS}, "user": frappe.session.user,
+            "theme": frappe.db.get_default("orbit_theme") or ""}
+
+
+THEMES = ("brand", "galaxy", "light", "dark")
+
+
+@frappe.whitelist()
+def set_theme(theme):
+    """The user's own theme, kept on the server so it follows him to any screen. The default is the brand theme."""
+    require_pos_user()
+    if theme not in THEMES:
+        frappe.throw(frappe._("Unknown theme"))
+    frappe.defaults.set_user_default("orbit_theme", theme)
+    return {"theme": theme}
 
 
 @frappe.whitelist()

@@ -639,3 +639,16 @@ class TestFlows(Base):
         with self.assertRaises(frappe.PermissionError):
             gifts.save_coupon(json.dumps({"code": "NOPE1", "kind": "percent", "value": 5}))
         gifts.void_gift_card(c, "mistake", manager="boss@orbit.test", pin="4321")
+
+    def test_37_theme_is_per_user_and_validated(self):
+        from orbit_pos.api import shift
+        frappe.set_user("cashier@orbit.test")
+        shift.set_theme("galaxy")
+        self.assertEqual(shift.my_permissions()["theme"], "galaxy")
+        with self.assertRaises(frappe.ValidationError):
+            shift.set_theme("neon")
+        frappe.set_user("boss@orbit.test")
+        self.assertNotEqual(shift.my_permissions()["theme"], "galaxy")     # another user keeps his own (default: brand in the UI)
+        shift.set_theme("dark")
+        frappe.set_user("cashier@orbit.test")
+        self.assertEqual(shift.my_permissions()["theme"], "galaxy")
