@@ -169,6 +169,50 @@ with sync_playwright() as p:
         log.append(("pos-flow", "FAIL " + str(e)[:200]))
         shot(page, "pos-flow-failure")
 
+    # ---- gift cards and coupons: manager screens, a card sale, a coupon + card payment, the receipt, the card history
+    try:
+        go(page, "/app/orbit-pos"); time.sleep(3)
+        fr = page.frame_locator("iframe")
+        fr.locator("input").first.fill("0"); fr.get_by_test_id("open").click(); time.sleep(3)
+        fr.get_by_test_id("tab-coupons").click(); time.sleep(1.5)
+        fr.get_by_test_id("cp-add").click(); fr.get_by_test_id("cf-code").fill("EID10"); fr.get_by_test_id("cf-value").fill("10")
+        cap(page, "كوبون جديد: خصم 10% على المجموع بعد العروض"); shot(page, "web-coupon-form", None, 500)
+        fr.get_by_test_id("cf-save").click(); fr.get_by_test_id("cp-row").first.wait_for(timeout=20000); time.sleep(1)
+        cap(page, "قائمة الكوبونات وعدد الاستخدام"); shot(page, "web-coupons-list")
+        fr.get_by_test_id("tab-gifts").click(); time.sleep(1.5)
+        fr.get_by_test_id("gift-sell-open").click(); fr.get_by_test_id("gf-amount").fill("100"); fr.get_by_test_id("gf-customer").fill("منى")
+        cap(page, "بيع كارت هدية بقيمة 100"); shot(page, "web-gift-sell-form", None, 500)
+        fr.get_by_test_id("gf-save").click(); fr.get_by_test_id("gift-sold").wait_for(timeout=20000)
+        gno = fr.get_by_test_id("gift-sold-no").inner_text().strip()
+        cap(page, "تم بيع الكارت " + gno + ": التزام وليس إيراد"); shot(page, "web-gift-sold")
+        fr.get_by_test_id("tab-sale").click(); time.sleep(1)
+        fr.get_by_test_id("scan").fill("2*6222"); fr.get_by_test_id("scan").press("Enter"); time.sleep(1.5)
+        fr.get_by_test_id("coupon-code").fill("EID10"); fr.get_by_test_id("coupon-apply").click(); time.sleep(2)
+        fr.get_by_test_id("coupon-applied").wait_for(timeout=20000)
+        fr.get_by_test_id("gift-no").fill(gno); fr.get_by_test_id("gift-apply").click(); fr.get_by_test_id("gift-applied").wait_for(timeout=20000); time.sleep(1)
+        assert "21.60" in fr.get_by_test_id("total").inner_text(), fr.get_by_test_id("total").inner_text()
+        assert "21.60" in fr.get_by_test_id("gift-covers").inner_text(), "gift card does not cover the total"
+        cap(page, "الكوبون خصم 2.40 والكارت غطّى 21.60 بالكامل"); shot(page, "web-pay-coupon-gift")
+        assert fr.get_by_test_id("pay").is_enabled(), "pay disabled although the card covers the total"
+        fr.get_by_test_id("pay").click(); time.sleep(4)
+        fr.get_by_test_id("receipt-modal").wait_for(); time.sleep(1)
+        rt = fr.get_by_test_id("receipt-sheet").inner_text()
+        assert "EID10" in rt and gno in rt, "receipt missing coupon or gift card: " + rt[:300]
+        cap(page, "الفاتورة بتظهر الكوبون والكارت ورصيده المتبقي"); shot(page, "web-gift-receipt", None, 800)
+        fr.get_by_test_id("receipt-close").click(); time.sleep(0.5)
+        fr.get_by_test_id("tab-gifts").click(); time.sleep(1.5)
+        fr.get_by_test_id("gh-" + gno).click(); fr.get_by_test_id("gift-history").wait_for(timeout=20000)
+        assert "78.40" in fr.get_by_test_id("gift-history").inner_text(), fr.get_by_test_id("gift-history").inner_text()
+        cap(page, "سجل الكارت: إصدار ثم استخدام. الرصيد 78.40"); shot(page, "web-gift-history")
+        fr.get_by_test_id("tab-sale").click(); time.sleep(1)
+        fr.get_by_test_id("counted").fill("100"); fr.get_by_test_id("close").click(); time.sleep(2)
+        zt = fr.get_by_test_id("z").inner_text()
+        assert "100.00" in zt, "Z report with a cash gift card sale does not balance: " + zt
+        cap(page, "قفل الشيفت: نقدية بيع الكارت داخلة في الدرج"); shot(page, "web-gift-z")
+    except Exception as e:
+        log.append(("gift-flow", "FAIL " + str(e)[:300]))
+        shot(page, "gift-flow-failure")
+
     # ---- manager approval of a blind close, then edit of an invoice in the closed shift
     try:
         pend = json.load(open("/tmp/orbit_pending.json"))

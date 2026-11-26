@@ -45,10 +45,12 @@ export default function Receipt({ data, onClose }) {
         </table>
         <hr />
         {d.discount ? <div className="r-row"><span>{B('خصم', 'Discount')}</span><span>{fmt(d.discount)}</span></div> : null}
+        {d.coupon ? <div className="r-row" data-testid="r-coupon"><span>{B('كوبون', 'Coupon')} {d.coupon}</span><span>-{fmt(d.coupon_amount)}</span></div> : null}
         {d.taxes.map((t, i) => <div className="r-row" key={i}><span>{t.name}</span><span>{fmt(t.amount)}</span></div>)}
         <div className="r-row r-total"><span>{d.is_return ? B('إجمالي المرتجع', 'Return total') : B('الإجمالي', 'Total')}</span><b>{fmt(Math.abs(d.grand_total))}</b></div>
         {d.rev ? <div className="r-row" data-testid="r-rev"><span>{B('نسخة معدّلة رقم', 'Revised copy no.')}</span><b>{d.rev}</b></div> : null}
         {d.payments.map((p, i) => <div className="r-row" key={i}><span>{p.method}</span><span>{fmt(Math.abs(p.amount))}</span>{p.ref ? <span> #{p.ref}</span> : null}</div>)}
+        {d.gift_card ? <div className="r-row" data-testid="r-gift"><span>{B('رصيد كارت الهدية', 'Gift card balance')} {d.gift_card}</span><span>{fmt(d.gift_balance)}</span></div> : null}
         {d.exchange_credit_used ? <div className="r-row"><span>{B('رصيد استبدال مستخدم', 'Exchange credit used')} {d.exchange_credit_used.name}</span><span>{fmt(d.exchange_credit_used.amount)}</span></div> : null}
         {ex ? (
           <div className="r-box" data-testid="r-exchange">

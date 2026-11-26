@@ -6,6 +6,8 @@ import Receipt from './Receipt.jsx';
 import Returns from './Returns.jsx';
 import Approvals from './Approvals.jsx';
 import EditInvoice from './EditInvoice.jsx';
+import Gifts from './Gifts.jsx';
+import Coupons from './Coupons.jsx';
 
 const queue = createQueue(window.localStorage);
 const TERMINAL = localStorage.getItem('orbit_terminal') || (localStorage.setItem('orbit_terminal', 'T' + Math.random().toString(36).slice(2, 6)), localStorage.getItem('orbit_terminal'));
@@ -38,6 +40,11 @@ export default function App() {
   const [rc, setRc] = useState(null);                      // receipt being shown / printed
   const [xr, setXr] = useState(null);                      // exchange receipt applied to this sale
   const [xrCode, setXrCode] = useState('');
+  const [couponCode, setCouponCode] = useState('');
+  const [couponIn, setCouponIn] = useState('');
+  const [giftNo, setGiftNo] = useState('');
+  const [giftAmt, setGiftAmt] = useState('');
+  const [gift, setGift] = useState(null);                  // checked gift card applied to this sale
   const [pending, setPending] = useState(queue.list().length);
   const counter = useRef(Number(localStorage.getItem('orbit_counter') || 0));
   const L = (k) => t(lang, k);
@@ -72,14 +79,19 @@ export default function App() {
   useEffect(() => {
     if (!cart.length) { setQuote(null); return; }
     let live = true;
-    api('sales.quote', { payload: JSON.stringify({ lines: cart.map(({ itemId, group, qty, price }) => ({ itemId, group, qty, price })) }) })
-      .then((q) => { if (live) setQuote(q); }).catch(() => { if (live) setQuote(localQuote(cart)); });
+    api('sales.quote', { payload: JSON.stringify({ lines: cart.map(({ itemId, group, qty, price }) => ({ itemId, group, qty, price })), coupon: couponCode || undefined, customer: customer ? customer.name : undefined, shift: shift ? shift.name : undefined }) })
+      .then((q) => { if (live) setQuote(q); }).catch((err) => {
+        if (!live) return;
+        if (couponCode && err.permanent) { setMsg(err.message); setCouponCode(''); return; }   // a coupon the server refuses is dropped, with the reason
+        setQuote(localQuote(cart));
+      });
     return () => { live = false; };
-  }, [cart]);
+  }, [cart, couponCode, customer]);
 
   const serialList = (l) => (l.serials || '').split(/[\s,;]+/).filter(Boolean);
   const total = quote ? quote.net_before_tax : 0;
   const credit = xr ? Math.min(xr.amount, total) : 0;
+  const giftCover = gift ? Math.max(0, Math.min(gift.balance, total - credit, Number(giftAmt) > 0 ? Number(giftAmt) : Infinity)) : 0;
   const serialsOk = cart.every((l) => !l.hasSerial || serialList(l).length === l.qty);
   useEffect(() => {
     const ch = new BroadcastChannel('orbit-display');
@@ -105,7 +117,7 @@ export default function App() {
     } catch (err) { setMsg(L('notFound') + ': ' + c); }
   }
 
-  const paid = (Number(cashPaid) || 0) + (Number(cardPaid) || 0) + credit;
+  const paid = (Number(cashPaid) || 0) + (Number(cardPaid) || 0) + credit + giftCover;
   const remaining = Math.max(0, total - paid);
   const change = Math.max(0, paid - total);
   const canPay = cart.length && quote && paid + 0.005 >= total && shift && serialsOk;
@@ -116,6 +128,17 @@ export default function App() {
       if (info.status !== 'Open') { setMsg(`${name}: ${info.status}`); return; }
       setXr(info); setXrCode('');
     } catch (err) { setMsg(err.message); }
+  }
+  async function applyCoupon() {
+    setMsg('');
+    if (!couponIn.trim()) return;
+    try { await api('sales.quote', { payload: JSON.stringify({ lines: cart.map(({ itemId, group, qty, price }) => ({ itemId, group, qty, price })), coupon: couponIn.trim(), customer: customer ? customer.name : undefined, shift: shift.name }) }); setCouponCode(couponIn.trim().toUpperCase()); setCouponIn(''); setMsg(L('cpApplied')); }
+    catch (err) { setMsg(err.message); }
+  }
+  async function applyGift() {
+    setMsg('');
+    try { const g = await api('gifts.check_gift_card', { card_no: giftNo }); if (g.status !== 'active') { setMsg(giftNo + ': ' + L('giftState_' + g.status)); return; } setGift(g); }
+    catch (err) { setMsg(err.message); }
   }
   async function newCustomer() {
     try { const c = await api('exchange.create_customer', { customer_name: newCust.name, mobile_no: newCust.phone }); setCustomer(c); setNewCust(null); setCustQ(''); setCustList([]); }
@@ -132,8 +155,10 @@ export default function App() {
       lines: cart.map((l) => ({ itemId: l.itemId, group: l.group, qty: l.qty, price: l.price, ...(l.hasSerial ? { serial_no: serialList(l) } : {}) })), payments };
     if (customer) payload.customer = customer.name;
     if (xr) payload.exchange_receipt = xr.name;
+    if (couponCode) payload.coupon = couponCode;
+    if (gift && giftCover > 0) { payload.gift_card = gift.card_no; if (Number(giftAmt) > 0) payload.gift_amount = Number(giftAmt); }
     queue.push(payload); setPending(queue.list().length);       // always queue first, so nothing is lost
-    setCart([]); setCashPaid(''); setCardPaid(''); setCardRef(''); setXr(null); setCustomer(null); setMsg(L('done') + (change ? ` — ${L('change')}: ${fmt(change)}` : ''));
+    setCart([]); setCashPaid(''); setCardPaid(''); setCardRef(''); setXr(null); setCustomer(null); setCouponCode(''); setGift(null); setGiftNo(''); setGiftAmt(''); setMsg(L('done') + (change ? ` — ${L('change')}: ${fmt(change)}` : ''));
     await flush();
     const res = lastResult[payload.txn_id];
     if (res && res.sales_invoice) { try { setRc(await api('exchange.get_receipt', { invoice: res.sales_invoice })); } catch (e) {} }
@@ -167,6 +192,8 @@ export default function App() {
           <button className={view === 'sale' ? 'on' : ''} onClick={() => setView('sale')} data-testid="tab-sale">{L('tabSale')}</button>
           <button className={view === 'returns' ? 'on' : ''} onClick={() => setView('returns')} data-testid="tab-returns">{L('tabReturns')}</button>
           {(perms.editInvoice === 'Y' || perms.voidInvoice === 'Y' || perms.editInvoice === 'A') && <button className={view === 'edit' ? 'on' : ''} onClick={() => setView('edit')} data-testid="tab-edit">{L('tabEdit')}</button>}
+          {perms.sellGiftCard === 'Y' && <button className={view === 'gifts' ? 'on' : ''} onClick={() => setView('gifts')} data-testid="tab-gifts">{L('tabGifts')}</button>}
+          {perms.coupons === 'Y' && <button className={view === 'coupons' ? 'on' : ''} onClick={() => setView('coupons')} data-testid="tab-coupons">{L('tabCoupons')}</button>}
           {perms.approve === 'Y' && perms.seeExpected === 'Y' && <button className={view === 'approvals' ? 'on' : ''} onClick={() => setView('approvals')} data-testid="tab-approvals">{L('tabApprovals')}</button>}
         </span>
         <span className="sp" />
@@ -188,6 +215,10 @@ export default function App() {
         </section>
       ) : view === 'edit' ? (
         <EditInvoice L={L} fmt={fmt} perms={perms} onReceipt={setRc} />
+      ) : view === 'gifts' ? (
+        <Gifts L={L} fmt={fmt} perms={perms} shift={shift} />
+      ) : view === 'coupons' ? (
+        <Coupons L={L} fmt={fmt} />
       ) : view === 'approvals' ? (
         <Approvals L={L} fmt={fmt} />
       ) : view === 'returns' ? (
@@ -227,6 +258,15 @@ export default function App() {
             <div data-testid="xr-box">
               {xr ? <div className="ok-box card" data-testid="xr-applied">{L('exchangeReceipt')} {xr.name}: {L('credit')} {fmt(xr.amount)} <button onClick={() => setXr(null)}>{L('remove')}</button></div>
                 : <div><input value={xrCode} onChange={(e) => setXrCode(e.target.value)} placeholder={L('receiptNo')} data-testid="xr-code" /> <button onClick={() => applyReceipt(xrCode.trim().toUpperCase())} data-testid="xr-apply">{L('applyReceipt')}</button></div>}
+            </div>
+            <div data-testid="coupon-box">
+              {couponCode ? <div className="ok-box card" data-testid="coupon-applied">🎟 {couponCode}: -{fmt(quote ? quote.coupon_disc || 0 : 0)} <button onClick={() => setCouponCode('')}>{L('remove')}</button></div>
+                : <div><input value={couponIn} onChange={(e) => setCouponIn(e.target.value)} placeholder={L('cpEnter')} data-testid="coupon-code" dir="ltr" /> <button onClick={applyCoupon} disabled={!cart.length} data-testid="coupon-apply">{L('cpApply')}</button></div>}
+            </div>
+            <div data-testid="gift-box">
+              {gift ? <div className="ok-box card" data-testid="gift-applied">🎁 <span dir="ltr">{gift.card_no}</span> · {L('giftBalance')} {fmt(gift.balance)} · {L('giftCovers')} <b data-testid="gift-covers">{fmt(giftCover)}</b>
+                  {' '}<input value={giftAmt} onChange={(e) => setGiftAmt(e.target.value)} placeholder={L('giftUseAmt')} inputMode="decimal" data-testid="gift-amt" /> <button onClick={() => { setGift(null); setGiftAmt(''); }}>{L('remove')}</button></div>
+                : <div><input value={giftNo} onChange={(e) => setGiftNo(e.target.value)} placeholder={L('giftUseNo')} data-testid="gift-no" dir="ltr" /> <button onClick={applyGift} data-testid="gift-apply">{L('giftCheck')}</button></div>}
             </div>
             <label>{L('cash')} <input value={cashPaid} onChange={(e) => setCashPaid(e.target.value)} inputMode="decimal" data-testid="cash" /></label>
             <label>{L('card')} <input value={cardPaid} onChange={(e) => setCardPaid(e.target.value)} inputMode="decimal" data-testid="card" /></label>

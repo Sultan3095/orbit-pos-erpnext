@@ -140,6 +140,11 @@ def get_receipt(invoice):
            "format": (prof.get("orbit_return_receipt_format") if si.is_return else prof.get("orbit_sale_receipt_format")) if prof else "Standard 80mm",
            "window_days": int(s.return_window_days or 0), "terms_ar": s.receipt_terms_ar or "", "terms_en": s.receipt_terms_en or "",
            "exchange_receipt": None}
+    if si.get("orbit_coupon"):
+        out["coupon"] = si.orbit_coupon; out["coupon_amount"] = flt(si.orbit_coupon_amount)
+    if si.get("orbit_gift_card") and flt(si.get("orbit_gift_amount")) > 0:
+        out["gift_card"] = si.orbit_gift_card
+        out["gift_balance"] = flt(frappe.db.get_value("POS Gift Card", si.orbit_gift_card, "balance"))
     if si.is_return:
         rec = frappe.db.get_value("POS Exchange Receipt", {"return_invoice": si.name}, ["name", "amount", "expires_on", "issued_on"], as_dict=True)
         if rec:
