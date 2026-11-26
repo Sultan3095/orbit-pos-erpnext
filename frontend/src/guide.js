@@ -31,7 +31,7 @@ let cur = null;
   function ensureCss() {
     if (document.getElementById('guide-css')) return;
     const s = document.createElement('style'); s.id = 'guide-css';
-    s.textContent = '#guide{position:fixed;inset:0;z-index:100000;pointer-events:none}#guide *{pointer-events:auto}#guide .gring{position:fixed;border:3px solid #F2A93B;border-radius:10px;box-shadow:0 0 0 4px rgba(242,169,59,.28),0 0 18px rgba(242,169,59,.8);pointer-events:none;animation:gpulse 1.1s ease-in-out infinite}' +
+    s.textContent = '#guide{position:fixed;inset:0;z-index:100000;pointer-events:none}#guide *{pointer-events:auto}#guide.gpass .gbox,#guide.gpass .gbox *{pointer-events:none}#guide.gpass .gbox .gx,#guide.gpass .gbox .gok,#guide.gpass .gbox [data-g=tap]{pointer-events:auto}#guide .gring{position:fixed;border:3px solid #F2A93B;border-radius:10px;box-shadow:0 0 0 4px rgba(242,169,59,.28),0 0 18px rgba(242,169,59,.8);pointer-events:none;animation:gpulse 1.1s ease-in-out infinite}' +
       '@keyframes gpulse{50%{box-shadow:0 0 0 9px rgba(242,169,59,.15),0 0 26px rgba(242,169,59,1)}}#guide .gbox{position:fixed;display:flex;align-items:flex-end;gap:6px;max-width:440px}#guide .gman{cursor:pointer;flex:none;filter:drop-shadow(0 6px 10px rgba(0,0,0,.35));transition:transform .15s}#guide .gman:hover{transform:scale(1.04)}' +
       '#guide .gbub{background:#fff;color:#12284C;border:2px solid #1BA39C;border-radius:14px;padding:10px 12px;font:600 14px/1.5 "Segoe UI",Tahoma,Arial,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.3);min-width:180px}#guide .gbub small{display:block;font-weight:400;margin-top:6px;opacity:.85}' +
       '#guide .gbub .gx{float:inline-end;border:0;background:#eef2f7;border-radius:8px;cursor:pointer;margin-inline-start:8px;padding:2px 8px;color:#12284C}#guide .gbub .gok{margin-top:8px;border:0;background:#1BA39C;color:#fff;border-radius:8px;padding:5px 12px;cursor:pointer;font-weight:600}#guide .gtap{color:#1BA39C;font-weight:600;font-size:12px}';
@@ -69,6 +69,11 @@ export function showGuide(key, { lang, user, force, issue } = {}) {
     const explain = () => { const b = box.querySelector('.gbub'); b.innerHTML = '<button class="gx" data-g="x" aria-label="close">✕</button><div>' + tx(I.short) + '</div><small data-g="long">' + tx(I.long) + '</small><button class="gok" data-g="ok">' + (lg === 'ar' ? 'تمام، فهمت' : 'Got it') + '</button>'; };
     g.addEventListener('click', (e) => { const d = e.target.closest('[data-g]'); if (e.target.closest('.gman') || (d && d.dataset.g === 'tap')) return explain(); if (d && (d.dataset.g === 'x' || d.dataset.g === 'ok')) done(); });
     cur = key;
+    g.classList.add('gpass');    // the Captain never blocks what the user must click next: clicks go through him, only the close, got-it and tap-for-details buttons catch them
+    if (key === 'ERROR') {       // an error card shows the explanation at once and goes away by itself
+      explain();
+      setTimeout(() => { if (cur === 'ERROR') close(); }, 14000);
+    }
   }, 120);
   return true;
 }

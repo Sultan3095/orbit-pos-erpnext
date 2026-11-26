@@ -33,7 +33,7 @@ try {
   // guide mascot: appears on the mistake, points at the scan field, explains when tapped, dismissible, once per issue
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await p.waitForSelector('#guide[data-guide=NOT_FOUND]'); await p.screenshot({ path: OUT + '/guide-1-not-found-en.png' });
-  await p.click('#guide .gman'); await p.waitForSelector('#guide [data-g=ok]'); await p.screenshot({ path: OUT + '/guide-2-explain-en.png' });
+  await p.click('#guide [data-g=tap]'); await p.waitForSelector('#guide [data-g=ok]'); await p.screenshot({ path: OUT + '/guide-2-explain-en.png' });
   await p.click('#guide [data-g=ok]'); await sleep(200); assert.equal(await p.$('#guide'), null, 'guide dismissed');
   await p.type('[data-testid=scan]', '999'); await p.keyboard.press('Enter'); await sleep(500);
   assert.equal(await p.$('#guide'), null, 'guide shows once per issue');
@@ -54,7 +54,7 @@ try {
   assert.equal(await p.$('[data-testid=cm-dialog]'), null); assert.ok((await txt('[data-testid=msg]')).includes('50.00'));
   await p.click('[data-testid=cash-out]'); await p.type('[data-testid=cm-amount]', '300'); await p.type('[data-testid=cm-reason]', 'big');
   await p.click('[data-testid=cm-save]'); await p.waitForSelector('[data-testid=cm-pin]'); await p.screenshot({ path: OUT + '/6-cashout-pin.png' });
-  await p.waitForSelector('#guide[data-guide=ERROR]'); await p.screenshot({ path: OUT + '/guide-6-any-error-en.png' }); await p.click('#guide .gman'); await p.waitForSelector('#guide [data-g=ok]'); await p.screenshot({ path: OUT + '/guide-7-any-error-explain-en.png' }); await p.click('#guide [data-g=ok]'); await sleep(200);
+  await p.waitForSelector('#guide[data-guide=ERROR]'); await p.screenshot({ path: OUT + '/guide-6-any-error-en.png' }); await p.waitForSelector('#guide [data-g=ok]'); await p.screenshot({ path: OUT + '/guide-7-any-error-explain-en.png' }); await p.click('#guide [data-g=ok]'); await sleep(200);
   await p.click('[data-testid=cash-in]'); // reopen as cash in resets the dialog
   await p.type('[data-testid=cm-amount]', '5'); await p.type('[data-testid=cm-reason]', 'float'); await p.click('[data-testid=cm-save]'); await new Promise((r) => setTimeout(r, 400));
   assert.equal(await p.$('[data-testid=cm-dialog]'), null);
