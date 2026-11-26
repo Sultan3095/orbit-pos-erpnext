@@ -3,7 +3,7 @@ app_title = "Orbit POS"
 app_publisher = "Orbit"
 app_description = "Retail POS for ERPNext: shifts, promotions, returns, offline sync, Arabic RTL"
 app_email = "dev@example.com"
-app_license = "MIT"
+app_license = "GPL-3.0-or-later"
 required_apps = ["erpnext"]
 
 after_install = "orbit_pos.setup.install.after_install"

@@ -45,3 +45,7 @@ Runtime differences: v15 = Python 3.10-3.12 + Node 18-20, v16 = Python 3.14 + No
 None of this has been run on a real v15 or v16 site yet. The GitHub Actions workflow `.github/workflows/erpnext-ci.yml`
 installs ERPNext v15 and v16 on GitHub's servers and runs `tests/test_integration.py` against each, so the first push
 shows which version fails and why.
+
+## License
+
+GPL-3.0-or-later (see LICENSE). Orbit POS is open source. The web app matches the GPL used by Frappe/ERPNext. The business model is support, hosting and customization, not license sales.
