@@ -127,6 +127,50 @@
    "options": "JSON",
    "label": "Permission overrides (cashier / manager)",
    "description": "Edited by the System Manager only. Empty = defaults."
+  },
+  {
+   "fieldname": "gift_design_section",
+   "fieldtype": "Section Break",
+   "label": "Gift card design (print sheet)"
+  },
+  {
+   "fieldname": "gift_client_name",
+   "fieldtype": "Data",
+   "label": "Store name on the card"
+  },
+  {
+   "fieldname": "gift_client_logo",
+   "fieldtype": "Attach Image",
+   "label": "Store logo",
+   "description": "The Orbit mark is fixed on every card. Your logo goes beside it."
+  },
+  {
+   "fieldname": "gift_color_1",
+   "fieldtype": "Color",
+   "label": "Card color",
+   "default": "#12284C"
+  },
+  {
+   "fieldname": "gift_color_2",
+   "fieldtype": "Color",
+   "label": "Second color",
+   "default": "#1BA39C"
+  },
+  {
+   "fieldname": "gift_accent",
+   "fieldtype": "Color",
+   "label": "Amount color",
+   "default": "#F2A93B"
+  },
+  {
+   "fieldname": "gift_terms_ar",
+   "fieldtype": "Small Text",
+   "label": "Card terms (Arabic, one per line)"
+  },
+  {
+   "fieldname": "gift_terms_en",
+   "fieldtype": "Small Text",
+   "label": "Card terms (English)"
   }
  ],
  "permissions": [
@@ -176,6 +220,14 @@
   "receipt_terms_ar",
   "receipt_terms_en",
   "permissions_section",
-  "permissions_json"
+  "permissions_json",
+  "gift_design_section",
+  "gift_client_name",
+  "gift_client_logo",
+  "gift_color_1",
+  "gift_color_2",
+  "gift_accent",
+  "gift_terms_ar",
+  "gift_terms_en"
  ]
 }

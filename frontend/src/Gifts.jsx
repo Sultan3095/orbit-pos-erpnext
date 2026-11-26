@@ -37,8 +37,8 @@ export default function Gifts({ L, fmt, perms, shift }) {
   async function cancel(no) { if (!window.confirm(L('giftVoidQ'))) return; try { await api('gifts.void_gift_card', { card_no: no, reason: 'cancelled' }); load(); } catch (e) { setMsg(e.message); } }
   async function extend(no) { const d = window.prompt(L('giftExpires') + ' (YYYY-MM-DD)'); if (d === null) return; try { await api('gifts.extend_gift_card', { card_no: no, new_date: d }); load(); } catch (e) { setMsg(e.message); } }
   async function writeOff() { setMsg(''); try { await api('gifts.write_off_gift_card', { card_no: wo.no, reason: wo.reason }); setWo(null); load(); } catch (e) { setMsg(e.message); } }
-  async function makeCards() { setMsg(''); try { const r = await api('gifts.print_gift_cards', { value: pf.value, qty: pf.qty }); setSheet(r.cards); setPf(null); } catch (e) { setMsg(e.message); } }
-  const cur = ''; const store = 'Orbit POS';
+  async function makeCards() { setMsg(''); try { const r = await api('gifts.print_gift_cards', { value: pf.value, qty: pf.qty }); setSheet(r.cards); setDsn(r.design); setPf(null); } catch (e) { setMsg(e.message); } }
+  const cur = ''; const [dsn, setDsn] = useState(null); const [po, setPo] = useState({ cropMarks: true, dataOnly: false });
   const T = byVal.total || {};
   const two = (n, v) => <td>{n || 0}{n ? <small className="muted"> ({fmt(v)})</small> : null}</td>;
   const st = (s) => L('giftState_' + s);
@@ -79,10 +79,13 @@ export default function Gifts({ L, fmt, perms, shift }) {
         <div className="card" data-testid="gift-print-form"><h3>{L('giftPrintCards')}</h3><p className="muted">{L('giftPrintHelp')}</p>
           <label>{L('giftAmount')} <input value={pf.value} onChange={(e) => setPf({ ...pf, value: e.target.value })} inputMode="decimal" data-testid="gp-value" /></label>
           <label>{L('giftQty')} <input value={pf.qty} onChange={(e) => setPf({ ...pf, qty: e.target.value })} inputMode="numeric" data-testid="gp-qty" /></label>
+          <label className="chk"><input type="checkbox" checked={po.cropMarks} onChange={(e) => setPo({ ...po, cropMarks: e.target.checked })} data-testid="gp-crop" /> {L('gpCrop')}</label>
+          <label className="chk"><input type="checkbox" checked={po.dataOnly} onChange={(e) => setPo({ ...po, dataOnly: e.target.checked })} data-testid="gp-dataonly" /> {L('gpDataOnly')}</label>
+          <p className="muted">{L('gdHelp')}</p>
           <button className="primary" onClick={makeCards} data-testid="gp-go">{L('giftSheetReady')}</button> <button onClick={() => setPf(null)}>{L('cancel')}</button></div>)}
       {sheet && (
-        <div className="card" data-testid="gift-sheet"><b>{L('giftSheetReady')}</b> <button className="primary" onClick={() => printSheet(sheet, store, cur)} data-testid="gp-print">🖨 {L('giftPrintNow')}</button> <button onClick={() => setSheet(null)}>{L('close')}</button>
-          <style>{SHEET_CSS}</style><div className="sheetprev" dangerouslySetInnerHTML={{ __html: sheetBody(sheet, store, cur) }} /></div>)}
+        <div className="card" data-testid="gift-sheet"><b>{L('giftSheetReady')}</b> <button className="primary" onClick={() => printSheet(sheet, dsn, cur, po)} data-testid="gp-print">🖨 {L('giftPrintNow')}</button> <button onClick={() => setSheet(null)} data-testid="gp-close">{L("close")}</button>
+          <style>{SHEET_CSS}</style><div className="sheetprev" dangerouslySetInnerHTML={{ __html: sheetBody(sheet, dsn, cur, po) }} /></div>)}
       {wo && (
         <div className="card" data-testid="gift-wo-form"><h3>{L('giftWriteOff')} <span dir="ltr">{wo.no}</span></h3><p className="muted">{L('giftWriteOffHelp')}</p>
           <label>{L('reason')} <input value={wo.reason} onChange={(e) => setWo({ ...wo, reason: e.target.value })} data-testid="gw-reason" /></label>

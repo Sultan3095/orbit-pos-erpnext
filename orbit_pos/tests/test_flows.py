@@ -675,6 +675,20 @@ class TestFlows(Base):
         row = [x for x in gifts.gift_by_value()["rows"] if x["value"] == 733.0][0]
         self.assertEqual((row["written_off_count"], row["written_off_total"]), (1, 703.0))
 
+    def test_40_gift_card_design_is_per_store_and_system_manager_only(self):
+        from orbit_pos.api import gifts
+        d0 = gifts.gift_design()
+        self.assertEqual(set(d0), {"client_name", "client_logo", "color_1", "color_2", "accent", "terms_ar", "terms_en"})
+        out = gifts.save_gift_design("سوبر ماركت النور", "/files/nour.png", "#0A5C36", "#1BA39C", "#F2A93B", "شرط 1\nشرط 2", "Valid at Al Nour")
+        self.assertEqual(out["client_name"], "سوبر ماركت النور"); self.assertEqual(out["color_1"], "#0A5C36")
+        self.assertEqual(gifts.print_gift_cards(500, 1)["design"]["client_logo"], "/files/nour.png")      # the print call returns the design the sheet uses
+        frappe.set_user("cashier@orbit.test")
+        try:
+            with self.assertRaises((frappe.PermissionError, frappe.ValidationError)):
+                gifts.save_gift_design("x")
+        finally:
+            frappe.set_user("Administrator")
+
     def test_39_printed_cards_unique_and_value_checked_on_sale(self):
         from orbit_pos.api import gifts
         sh = self._shift()

@@ -1,4 +1,5 @@
 """Drives a live ERPNext desk with Orbit POS: screenshots of every screen and a captioned walkthrough video."""
+import urllib.parse
 import sys, os, time, json
 from playwright.sync_api import sync_playwright
 
@@ -219,11 +220,27 @@ with sync_playwright() as p:
         fr.get_by_test_id("gw-save").click(); time.sleep(2)
         assert "1000" in fr.get_by_test_id("gift-denom").inner_text().replace(",", ""), "1000 row missing after write-off"
         cap(page, "الكارت المنتهي اتعدم والالتزام اتقفل"); shot(page, "web-gift-written-off")
+        logo = "data:image/svg+xml;utf8," + urllib.parse.quote('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><rect width="120" height="120" rx="24" fill="#0a7a3d"/><text x="60" y="78" font-size="54" text-anchor="middle" fill="#fff">N</text></svg>')
+        st = page.evaluate("""async (a) => { const r = await fetch('/api/method/orbit_pos.api.gifts.save_gift_design', {method: 'POST', credentials: 'include', headers: {'Content-Type': 'application/json', 'X-Frappe-CSRF-Token': frappe.csrf_token}, body: JSON.stringify(a)}); return r.status; }""",
+                          {"client_name": "سوبر ماركت النور", "client_logo": logo, "color_1": "#0A5C36", "color_2": "#1BA39C", "accent": "#F2A93B", "terms_ar": "شرط النور الأول\nشرط النور الثاني", "terms_en": "Valid at Al Nour only."})
+        assert st == 200, "save_gift_design failed: %s" % st
         fr.get_by_test_id("gift-print-open").click(); fr.get_by_test_id("gp-value").fill("500"); fr.get_by_test_id("gp-qty").fill("8")
         cap(page, "طباعة كروت: القيمة والعدد"); shot(page, "web-gift-print-form", None, 500)
         fr.get_by_test_id("gp-go").click(); fr.get_by_test_id("gift-sheet").wait_for(timeout=20000); time.sleep(1)
         assert fr.locator(".gqr svg rect").count() > 100 and fr.locator(".gbar svg").count() == 8, "QR / barcode not generated"
         cap(page, "الكروت جاهزة: QR وباركود بيتولدوا من رقم الكارت"); shot(page, "web-gift-cards-sheet")
+        sh_ = fr.get_by_test_id("gift-sheet")
+        assert "سوبر ماركت النور" in sh_.inner_text() and "شرط النور الأول" in sh_.inner_text(), "client name / terms missing on the sheet"
+        assert fr.locator(".glogo").count() == 8 and fr.locator(".gfixed").count() >= 8 and fr.locator(".gcrop").count() == 2, "client logo / fixed Orbit mark / crop marks missing"
+        assert "10, 92, 54" in fr.locator("[data-kind=front]").first.get_attribute("style") or "0a5c36" in fr.locator("[data-kind=front]").first.get_attribute("style").lower(), "client color not applied"
+        cap(page, "كروت محل: سوبر ماركت النور، علامة Orbit ثابتة، لوجو المحل، علامات القص"); shot(page, "web-gift-cards-sheet-client")
+        fr.get_by_test_id("gp-close").click(); time.sleep(.5)
+        fr.get_by_test_id("gift-print-open").click(); fr.get_by_test_id("gp-value").fill("200"); fr.get_by_test_id("gp-qty").fill("2")
+        fr.get_by_test_id("gp-dataonly").check(); fr.get_by_test_id("gp-crop").uncheck(); fr.get_by_test_id("gp-go").click(); fr.get_by_test_id("gift-sheet").wait_for(timeout=20000); time.sleep(.8)
+        assert fr.locator(".gtop").count() == 0 and fr.locator(".gcrop").count() == 0 and fr.locator("[data-page=back]").count() == 0 and fr.locator(".gbar svg").count() == 2, "data-only mode wrong"
+        cap(page, "وضع الرقم والـQR والباركود بس للكروت المطبوعة مسبقاً"); shot(page, "web-gift-cards-data-only")
+        fr.get_by_test_id("gp-close").click(); time.sleep(.5)
+
         fr.get_by_test_id("tab-sale").click(); time.sleep(1.5)
         assert fr.get_by_test_id("gift-close").is_visible(), "close block missing"
         cap(page, "قبل قفل الشيفت: الكروت المباعة بالفئة والكاش اللي في الدرج"); shot(page, "web-gift-close-block")

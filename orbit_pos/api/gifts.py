@@ -6,7 +6,7 @@
 import frappe
 from frappe.utils import flt, nowdate, getdate, add_days
 from orbit_pos.logic.promotions import r2, coupon_amount
-from .common import require_pos_user, log_approval, perm, can, approver_for, require
+from .common import require_pos_user, log_approval, perm, can, approver_for, require, settings
 
 GIFT_MODE = "Gift Card"
 LIABILITY = "Gift Card Liability"
@@ -305,7 +305,28 @@ def print_gift_cards(value, qty):
                 break
         frappe.get_doc({"doctype": "POS Printed Gift Card", "card_no": no, "value": value, "printed_on": nowdate()}).insert(ignore_permissions=True)
         out.append({"card_no": no, "value": value})
-    return {"cards": out}
+    return {"cards": out, "design": gift_design()}
+
+
+@frappe.whitelist()
+def gift_design():
+    """What the print sheet uses: the store's name, logo, colors and terms. Empty values fall back to the Orbit defaults in the frontend."""
+    require_pos_user()
+    s = settings()
+    return {"client_name": s.get("gift_client_name") or "", "client_logo": s.get("gift_client_logo") or "", "color_1": s.get("gift_color_1") or "",
+            "color_2": s.get("gift_color_2") or "", "accent": s.get("gift_accent") or "", "terms_ar": s.get("gift_terms_ar") or "", "terms_en": s.get("gift_terms_en") or ""}
+
+
+@frappe.whitelist()
+def save_gift_design(client_name="", client_logo="", color_1="", color_2="", accent="", terms_ar="", terms_en=""):
+    """System Manager only (same lock as Settings). The Orbit mark is not a setting: it is always printed."""
+    require_pos_user()
+    require("settings")
+    doc = frappe.get_doc("Orbit POS Settings")
+    for f, v in (("gift_client_name", client_name), ("gift_client_logo", client_logo), ("gift_color_1", color_1), ("gift_color_2", color_2), ("gift_accent", accent), ("gift_terms_ar", terms_ar), ("gift_terms_en", terms_en)):
+        doc.set(f, v or "")
+    doc.save(ignore_permissions=True)
+    return gift_design()
 
 
 def shift_gifts(shift):
