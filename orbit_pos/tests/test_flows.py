@@ -498,3 +498,15 @@ class TestFlows(Base):
         self.assertEqual(int(pts()), 2)
         sales.create_return(r["sales_invoice"], json.dumps([{"item_code": "ORB-A", "qty": 1}]))
         self.assertEqual(int(pts()), 1)
+
+    def test_28_loyalty_never_goes_below_zero(self):
+        from orbit_pos.api import sales, exchange
+        s = frappe.get_doc("Orbit POS Settings"); s.currency_per_point = 10; s.save()
+        c = exchange.create_customer("Loyalty Clamp Cust", "01000000078")
+        sh = self._shift()
+        r = self._sale(sh, [{"itemId": "ORB-A", "qty": 2, "price": 10}], 20, customer=c["name"])
+        pts = lambda: int(frappe.db.sql("select coalesce(sum(points),0) from `tabLoyalty Ledger Entry` where customer=%s", c["name"])[0][0])
+        sales._ledger(c["name"], -2, None, "spent elsewhere")      # the customer already used the points
+        self.assertEqual(pts(), 0)
+        sales.create_return(r["sales_invoice"], json.dumps([{"item_code": "ORB-A", "qty": 2}]))
+        self.assertEqual(pts(), 0)

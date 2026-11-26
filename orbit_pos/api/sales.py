@@ -228,6 +228,17 @@ def _balance(customer):
     return int(frappe.db.sql("select coalesce(sum(points),0) from `tabLoyalty Ledger Entry` where customer=%s", customer)[0][0])
 
 
+def _balance(customer):
+    return int(frappe.db.sql("select coalesce(sum(points),0) from `tabLoyalty Ledger Entry` where customer=%s", customer)[0][0])
+
+
+def _take_back(customer, pts, inv, note):
+    """Remove points but never push the balance below 0 (same rule as the desktop app)."""
+    pts = min(int(pts), max(0, _balance(customer)))
+    if pts > 0:
+        _ledger(customer, -pts, inv, note)
+
+
 def _ledger(customer, pts, inv, note):
     frappe.get_doc({"doctype": "Loyalty Ledger Entry", "customer": customer, "points": pts,
                     "sales_invoice": inv, "note": note}).insert(ignore_permissions=True)
@@ -391,7 +402,7 @@ def create_return(invoice, items, manager=None, pin=None, current_branch=None, m
     if orig.customer:   # points earned on goods that come back are taken back (same rule as the desktop app)
         back = points_earned(abs(ret.grand_total), flt(settings().currency_per_point))
         if back:
-            _ledger(orig.customer, -int(back), ret.name, "return")
+            _take_back(orig.customer, back, ret.name, "return")
     receipt = None
     if mode == "credit":
         receipt = _issue_receipt(orig.customer, abs(ret.grand_total), ret.name, ret.orbit_shift).name
@@ -434,7 +445,9 @@ def _editable_invoice(invoice):
 def _reverse_loyalty(si):
     rows = frappe.db.sql("select customer, coalesce(sum(points),0) from `tabLoyalty Ledger Entry` where sales_invoice=%s group by customer", si.name)
     for cust, pts in rows:
-        if pts:
+        if pts > 0:
+            _take_back(cust, pts, si.name, "reverse")
+        elif pts < 0:
             _ledger(cust, -int(pts), si.name, "reverse")
 
 
