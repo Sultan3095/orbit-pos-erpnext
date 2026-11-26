@@ -510,3 +510,132 @@ class TestFlows(Base):
         self.assertEqual(pts(), 0)
         sales.create_return(r["sales_invoice"], json.dumps([{"item_code": "ORB-A", "qty": 2}]))
         self.assertEqual(pts(), 0)
+
+    # ---- gift cards and coupons (same rules as the desktop app)
+    def _coupon(self, code, **kw):
+        from orbit_pos.api import gifts
+        d = {"code": code, "kind": "percent", "value": 10}
+        d.update(kw)
+        gifts.save_coupon(json.dumps(d))
+
+    def test_29_coupon_percent_exchange_only_and_limits(self):
+        from orbit_pos.api import sales, gifts
+        self._coupon("CPN10", value=10, max_uses=1)
+        sh = self._shift()
+        q = sales.quote(json.dumps({"lines": [{"itemId": "ORB-A", "qty": 3, "price": 10}], "coupon": "cpn10"}))
+        self.assertEqual(flt(q["coupon_disc"]), 3.0); self.assertEqual(flt(q["net_before_tax"]), 27.0)
+        r = self._sale(sh, [{"itemId": "ORB-A", "qty": 3, "price": 10}], 27, coupon="CPN10")
+        si = frappe.get_doc("Sales Invoice", r["sales_invoice"])
+        self.assertEqual(flt(si.grand_total), 27.0); self.assertEqual(si.orbit_coupon, "CPN10")
+        self.assertTrue(all(i.orbit_promo for i in si.items))
+        with self.assertRaises(frappe.ValidationError):      # exchange only, no cash refund
+            sales.create_return(si.name, json.dumps([{"item_code": "ORB-A", "qty": 1}]), mode="refund")
+        sales.create_return(si.name, json.dumps([{"item_code": "ORB-A", "qty": 1}]), mode="credit")
+        with self.assertRaises(frappe.ValidationError):      # max_uses 1 reached
+            self._sale(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 10, coupon="CPN10")
+
+    def test_30_coupon_min_total_dates_disabled_and_amount(self):
+        from orbit_pos.api import sales
+        self._coupon("MIN50", kind="amount", value=5, min_total=50)
+        self._coupon("OLD", value=10, end_date="2020-01-01")
+        self._coupon("OFF", value=10, enabled=0)
+        sh = self._shift()
+        for code in ("MIN50", "OLD", "OFF", "NOPE"):
+            with self.assertRaises(frappe.ValidationError):
+                sales.submit_sale(self._payload(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 10, coupon=code))
+        self._coupon("FIVE", kind="amount", value=5)
+        r = self._sale(sh, [{"itemId": "ORB-A", "qty": 2, "price": 10}], 15, coupon="FIVE")
+        self.assertEqual(flt(frappe.db.get_value("Sales Invoice", r["sales_invoice"], "grand_total")), 15.0)
+
+    def test_31_coupon_per_customer_limit_and_void_frees_use(self):
+        from orbit_pos.api import sales, exchange
+        self._coupon("ONCE", value=10, max_per_customer=1)
+        c = exchange.create_customer("Coupon Cust", "01000000091")
+        sh = self._shift()
+        with self.assertRaises(frappe.ValidationError):      # needs a named customer
+            sales.submit_sale(self._payload(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 10, coupon="ONCE"))
+        r = self._sale(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 9, coupon="ONCE", customer=c["name"])
+        with self.assertRaises(frappe.ValidationError):
+            self._sale(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 9, coupon="ONCE", customer=c["name"])
+        sales.void_invoice(r["sales_invoice"], "mistake")
+        self._sale(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 9, coupon="ONCE", customer=c["name"])
+
+    def test_32_gift_card_sale_is_liability_and_counts_in_drawer(self):
+        from orbit_pos.api import gifts, shift
+        sh = self._shift(100)
+        before = shift.expected_cash(sh)
+        c = gifts.sell_gift_card(200, sh, "Cash", customer_name="Mona")
+        self.assertEqual(c["balance"], 200.0); self.assertEqual(c["status"], "active")
+        self.assertEqual(shift.expected_cash(sh), before + 200)
+        gl = frappe.db.sql("""select coalesce(sum(credit - debit),0) from `tabGL Entry` where voucher_no=%s and account like %s and is_cancelled=0""",
+                           (c["journal_entry"], "%Gift Card Liability%"))[0][0]
+        self.assertEqual(flt(gl), 200.0)                    # money held for the customer, not income
+        self.assertEqual(gifts.list_gift_cards()["liability"]["open"], 200.0 + sum(
+            i["balance"] for i in gifts.list_gift_cards()["cards"] if i["status"] == "active" and i["card_no"] != c["card_no"]))
+        with self.assertRaises(frappe.ValidationError):
+            gifts.sell_gift_card(0, sh)
+        with self.assertRaises(frappe.ValidationError):
+            gifts.sell_gift_card(50, sh, "Exchange Credit")
+        gifts.void_gift_card(c["card_no"], "sold by mistake")   # unused: allowed, and the drawer goes back
+        self.assertEqual(shift.expected_cash(sh), before)
+        self.assertEqual(gifts.check_gift_card(c["card_no"])["status"], "void")
+
+    def test_33_pay_with_gift_card_partial_return_refund_void_and_edit_block(self):
+        from orbit_pos.api import gifts, sales
+        sh = self._shift()
+        c = gifts.sell_gift_card(100, sh, "Cash")["card_no"]
+        r = self._sale(sh, [{"itemId": "ORB-A", "qty": 3, "price": 10}], 10, gift_card=c, gift_amount=20)
+        si = frappe.get_doc("Sales Invoice", r["sales_invoice"])
+        self.assertEqual(flt(si.orbit_gift_amount), 20.0)
+        self.assertEqual(sorted((p.mode_of_payment, flt(p.amount)) for p in si.payments), [("Cash", 10.0), ("Gift Card", 20.0)])
+        self.assertEqual(gifts.check_gift_card(c)["balance"], 80.0)
+        info = sales.invoice_for_edit(si.name)
+        self.assertIn("gift", info["blockers"])
+        with self.assertRaises(frappe.ValidationError):
+            sales.edit_invoice(si.name, json.dumps({"lines": [{"itemId": "ORB-A", "qty": 1, "price": 10}], "payments": [{"method": "Cash", "amount": 10}]}), "x")
+        with self.assertRaises(frappe.ValidationError):      # used card cannot be cancelled
+            gifts.void_gift_card(c)
+        ret = sales.create_return(si.name, json.dumps([{"item_code": "ORB-A", "qty": 1}]))   # 10 back: 2/3 to the card, rest cash
+        self.assertAlmostEqual(ret["gift_refund"], 6.67, places=2)
+        self.assertAlmostEqual(gifts.check_gift_card(c)["balance"], 86.67, places=2)
+        log = [x["kind"] for x in gifts.gift_card_history(c)["log"]]
+        self.assertEqual(log, ["issue", "redeem", "refund"])
+
+    def test_34_void_gift_paid_invoice_restores_card_and_full_cover(self):
+        from orbit_pos.api import gifts, sales
+        sh = self._shift()
+        c = gifts.sell_gift_card(100, sh, "Cash")["card_no"]
+        r = sales.submit_sale(json.dumps({"txn_id": "G-" + uuid.uuid4().hex[:8], "shift": sh, "payments": [],
+                                          "lines": [{"itemId": "ORB-A", "qty": 2, "price": 10}], "gift_card": c}))
+        self.assertEqual(flt(r["gift_used"]), 20.0); self.assertEqual(gifts.check_gift_card(c)["balance"], 80.0)
+        sales.void_invoice(r["sales_invoice"], "customer changed mind")
+        self.assertEqual(gifts.check_gift_card(c)["balance"], 100.0)
+
+    def test_35_gift_card_expired_empty_unknown_and_over_balance(self):
+        from orbit_pos.api import gifts, sales
+        sh = self._shift()
+        c = gifts.sell_gift_card(15, sh, "Cash", expires_days=30)["card_no"]
+        frappe.db.set_value("POS Gift Card", c, "expires_on", "2020-01-01")
+        with self.assertRaises(frappe.ValidationError):
+            self._sale(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 0, gift_card=c)
+        gifts.extend_gift_card(c, frappe.utils.add_days(nowdate(), 5))
+        r = self._sale(sh, [{"itemId": "ORB-A", "qty": 3, "price": 10}], 15, gift_card=c)   # card holds 15 of 30
+        self.assertEqual(flt(r["gift_used"]), 15.0); self.assertEqual(flt(frappe.db.get_value("POS Gift Card", c, "balance")), 0.0)
+        with self.assertRaises(frappe.ValidationError):
+            self._sale(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 10, gift_card=c)
+        with self.assertRaises(frappe.DoesNotExistError):
+            gifts.check_gift_card("NOPE-0000")
+
+    def test_36_cashier_cannot_void_gift_card_or_save_coupon(self):
+        from orbit_pos.api import gifts
+        frappe.set_user("Administrator"); sh = self._shift()
+        frappe.db.set_value("POS Shift", sh, {"shared_shift": 1})
+        frappe.set_user("cashier@orbit.test")
+        c = gifts.sell_gift_card(40, sh, "Cash")["card_no"]      # cashier may sell
+        with self.assertRaises(frappe.PermissionError):
+            gifts.void_gift_card(c)
+        with self.assertRaises(frappe.PermissionError):
+            gifts.void_gift_card(c, manager="boss@orbit.test", pin="0000")
+        with self.assertRaises(frappe.PermissionError):
+            gifts.save_coupon(json.dumps({"code": "NOPE1", "kind": "percent", "value": 5}))
+        gifts.void_gift_card(c, "mistake", manager="boss@orbit.test", pin="4321")

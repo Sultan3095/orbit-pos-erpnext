@@ -97,7 +97,17 @@ def _promo_vector(p: dict, lines: list) -> list:
     return out
 
 
-def apply_promotions(lines: list, promos: list, now: Optional[datetime] = None) -> dict:
+def coupon_amount(c: Optional[dict], base: float) -> float:
+    """Amount a coupon takes off `base` (the subtotal after item promotions). 0 when the minimum is not met."""
+    if not c or not base > 0:
+        return 0.0
+    if c.get("minTotal") and base < c["minTotal"]:
+        return 0.0
+    d = base * min(100, c.get("value") or 0) / 100 if c.get("kind") == "percent" else (c.get("value") or 0)
+    return r2(min(base, d))
+
+
+def apply_promotions(lines: list, promos: list, now: Optional[datetime] = None, coupon: Optional[dict] = None) -> dict:
     """lines: [{itemId, group, qty, price, manualPct, manualAmt, noPromo}]"""
     act = [p for p in (promos or []) if promo_active(p, now)]
     L = []
@@ -144,5 +154,11 @@ def apply_promotions(lines: list, promos: list, now: Optional[datetime] = None) 
     if best_inv["name"]:
         inv_d = r2(inv_d + best_inv["d"])
         inv_names.append(best_inv["name"])
-    return {"lines": L, "subtotal": subtotal,
+    coupon_disc = 0.0
+    if coupon:
+        coupon_disc = coupon_amount(coupon, r2(subtotal - min(subtotal, inv_d)))
+        if coupon_disc > 0:
+            inv_d = r2(inv_d + coupon_disc)
+            inv_names.append("Coupon " + str(coupon.get("code")))
+    return {"lines": L, "subtotal": subtotal, "couponDisc": coupon_disc,
             "invoicePromoDisc": min(subtotal, inv_d), "invoicePromoNames": inv_names}

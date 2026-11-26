@@ -18,6 +18,11 @@ CUSTOM_FIELDS = {
         dict(fieldname="orbit_rev", label="Revision no.", fieldtype="Int", read_only=1, no_copy=1, insert_after="orbit_revision_of"),
         dict(fieldname="orbit_edit_reason", label="Edit reason", fieldtype="Small Text", read_only=1, no_copy=1,
              insert_after="orbit_rev"),
+        dict(fieldname="orbit_coupon", label="Coupon", fieldtype="Data", read_only=1, no_copy=1, insert_after="orbit_edit_reason"),
+        dict(fieldname="orbit_coupon_amount", label="Coupon amount", fieldtype="Currency", read_only=1, no_copy=1, insert_after="orbit_coupon"),
+        dict(fieldname="orbit_gift_card", label="Gift card", fieldtype="Data", read_only=1, no_copy=1, insert_after="orbit_coupon_amount"),
+        dict(fieldname="orbit_gift_amount", label="Paid by gift card", fieldtype="Currency", read_only=1, no_copy=1, insert_after="orbit_gift_card"),
+        dict(fieldname="orbit_gift_refunded", label="Refunded to gift card", fieldtype="Currency", read_only=1, no_copy=1, insert_after="orbit_gift_amount"),
     ],
     "Sales Invoice Payment": [
         dict(fieldname="orbit_ref", label="Card slip / approval code", fieldtype="Data", insert_after="mode_of_payment"),

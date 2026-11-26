@@ -7,6 +7,7 @@ from orbit_pos.logic.promotions import apply_promotions, r2
 from orbit_pos.logic.returns import return_allowed, refund_amount, cross_branch_allowed, credit_expiry, credit_expired, split_credit
 from orbit_pos.logic.loyalty import points_earned, redeem_value
 from orbit_pos.logic.barcodes import make_ean13, parse_scale_barcode
+from . import gifts
 from .common import require_pos_user, verify_manager_pin, log_approval, settings, perm, can, approver_for
 
 
@@ -57,15 +58,16 @@ def next_barcode(item_code=None):
     return code
 
 
-def _compute(lines, customer_points=0, inv_pct=0, inv_amt=0):
+def _compute(lines, customer_points=0, inv_pct=0, inv_amt=0, coupon=None):
     s = settings()
-    pr = apply_promotions(lines, active_promotions(), now_datetime())
+    pr = apply_promotions(lines, active_promotions(), now_datetime(), coupon)
     sub = pr["subtotal"]
     manual_inv = r2(min(sub, (inv_amt or 0) + sub * (inv_pct or 0) / 100))
     redeem = redeem_value(customer_points, flt(s.value_per_point), max(0.0, sub - manual_inv - pr["invoicePromoDisc"]))
     inv_disc = r2(min(sub, manual_inv + pr["invoicePromoDisc"] + redeem))
     return {"lines": pr["lines"], "subtotal": sub, "invoice_discount": inv_disc, "redeem_value": redeem,
-            "net_before_tax": r2(sub - inv_disc), "invoice_promo_disc": pr["invoicePromoDisc"]}
+            "net_before_tax": r2(sub - inv_disc), "invoice_promo_disc": pr["invoicePromoDisc"],
+            "coupon_disc": pr.get("couponDisc", 0.0)}
 
 
 @frappe.whitelist()
@@ -73,7 +75,20 @@ def quote(payload):
     """Server-side price calculation. The client displays this, it never decides totals."""
     require_pos_user()
     p = frappe.parse_json(payload)
-    return _compute(p["lines"], p.get("redeem_points", 0), p.get("inv_pct", 0), p.get("inv_amt", 0))
+    cpn = None
+    if p.get("coupon"):
+        cpn = gifts.to_engine(gifts.check_coupon(p["coupon"], p.get("customer"), _walkin(p)))
+    res = _compute(p["lines"], p.get("redeem_points", 0), p.get("inv_pct", 0), p.get("inv_amt", 0), cpn)
+    if cpn and not res["coupon_disc"] > 0:
+        frappe.throw(frappe._("The coupon needs a subtotal of at least {0}").format(cpn["minTotal"]))
+    return res
+
+
+def _walkin(p):
+    """The default customer of the shift's POS Profile (a coupon with a per-customer limit needs a named customer)."""
+    sh = p.get("shift")
+    prof = frappe.db.get_value("POS Shift", sh, "pos_profile") if sh else None
+    return frappe.db.get_value("POS Profile", prof, "customer") if prof else None
 
 
 def _check_discount_authority(p, shift):
@@ -138,7 +153,10 @@ def _submit_sale(payload):
     pts = 0
     if p.get("redeem_points"):
         pts = min(int(p["redeem_points"]), _balance(customer))
-    calc = _compute(p["lines"], pts, p.get("inv_pct", 0), p.get("inv_amt", 0))
+    cdoc = gifts.check_coupon(p["coupon"], customer, frappe.db.get_value("POS Profile", sh.pos_profile, "customer")) if p.get("coupon") else None
+    calc = _compute(p["lines"], pts, p.get("inv_pct", 0), p.get("inv_amt", 0), gifts.to_engine(cdoc) if cdoc else None)
+    if cdoc and not calc["coupon_disc"] > 0:
+        frappe.throw(frappe._("The coupon needs a subtotal of at least {0}").format(cdoc.min_total))
     prof = frappe.get_doc("POS Profile", sh.pos_profile)
 
     si = frappe.new_doc("Sales Invoice")
@@ -176,6 +194,9 @@ def _submit_sale(payload):
         row.rate = price - unit_disc
     si.set("payments", [])   # drop the profile's default zero-amount rows
     si.calculate_taxes_and_totals()
+    if cdoc:
+        si.orbit_coupon = cdoc.name
+        si.orbit_coupon_amount = calc["coupon_disc"]
 
     paid = 0.0
     rec, credit_used, credit_left = None, 0.0, 0.0
@@ -184,7 +205,19 @@ def _submit_sale(payload):
         credit_used, credit_left = split_credit(flt(rec.amount), flt(si.grand_total))
         si.append("payments", {"mode_of_payment": ensure_credit_mode(prof.company), "amount": credit_used})
         paid += credit_used
-    for pay in p["payments"]:
+    gift_used = 0.0
+    if p.get("gift_card"):
+        gc = gifts.check_card(p["gift_card"], lock=True)
+        want = flt(p.get("gift_amount")) or float("inf")
+        gift_used = r2(min(flt(gc.balance), flt(si.grand_total) - credit_used, want))
+        if gift_used > 0:
+            si.append("payments", {"mode_of_payment": gifts.ensure_gift_mode(prof.company), "amount": gift_used})
+            paid += gift_used
+            si.orbit_gift_card = gc.name
+            si.orbit_gift_amount = gift_used
+    for pay in p.get("payments", []):
+        if pay["method"] in (gifts.GIFT_MODE, CREDIT_MODE):
+            frappe.throw(frappe._("Use the gift card field or the exchange receipt field for this"))
         si.append("payments", {"mode_of_payment": pay["method"], "amount": flt(pay["amount"]),
                                "orbit_ref": (pay.get("ref") or "")[:60]})
         paid += flt(pay["amount"])
@@ -205,6 +238,8 @@ def _submit_sale(payload):
     si.insert()
     si.submit()
 
+    if gift_used > 0:
+        gifts.redeem(si.orbit_gift_card, gift_used, si.name)
     new_receipt = None
     if rec:
         rec.db_set({"status": "Redeemed", "redeemed_in": si.name})
@@ -219,7 +254,9 @@ def _submit_sale(payload):
     frappe.get_doc({"doctype": "Offline Transaction", "txn_id": txn_id, "terminal": p.get("terminal"), "shift": shift,
                     "payload_hash": body_hash, "status": "Created", "sales_invoice": si.name}).insert(ignore_permissions=True)
     return {"status": "created", "sales_invoice": si.name, "grand_total": si.grand_total, "change": change,
-            "exchange_credit_used": credit_used, "new_exchange_receipt": new_receipt}
+            "exchange_credit_used": credit_used, "new_exchange_receipt": new_receipt,
+            "coupon_amount": calc["coupon_disc"] if cdoc else 0, "gift_used": gift_used,
+            "gift_balance": flt(frappe.db.get_value("POS Gift Card", si.orbit_gift_card, "balance")) if gift_used > 0 else None}
 
 
 def _balance(customer):
@@ -390,12 +427,21 @@ def create_return(invoice, items, manager=None, pin=None, current_branch=None, m
     ret.update_stock = 1
     ret.calculate_taxes_and_totals()
     ret.set("payments", [])
+    gift_part = 0.0
     if mode == "credit":
         ret.append("payments", {"mode_of_payment": ensure_credit_mode(ret.company), "amount": ret.grand_total})
     else:
-        modes = [p.mode_of_payment for p in orig.payments]
+        modes = [p.mode_of_payment for p in orig.payments if p.mode_of_payment != gifts.GIFT_MODE]
         cash = [m for m in modes if frappe.db.get_value("Mode of Payment", m, "type") == "Cash"]
-        ret.append("payments", {"mode_of_payment": (cash or modes or ["Cash"])[0], "amount": ret.grand_total})
+        total = abs(flt(ret.grand_total))
+        left = flt(orig.get("orbit_gift_amount")) - flt(orig.get("orbit_gift_refunded"))
+        if left > 0.004 and flt(orig.grand_total) and frappe.db.get_value("POS Gift Card", orig.orbit_gift_card, "status") == "Active":
+            # the part that was paid with a gift card goes back onto that card, the rest is cash
+            gift_part = r2(min(left, total * flt(orig.orbit_gift_amount) / flt(orig.grand_total), total))
+        if gift_part > 0:
+            ret.append("payments", {"mode_of_payment": gifts.ensure_gift_mode(ret.company), "amount": -gift_part})
+        if total - gift_part > 0.004:
+            ret.append("payments", {"mode_of_payment": (cash or modes or ["Cash"])[0], "amount": -r2(total - gift_part)})
     ret.paid_amount = ret.grand_total
     ret.insert()
     ret.submit()
@@ -403,11 +449,15 @@ def create_return(invoice, items, manager=None, pin=None, current_branch=None, m
         back = points_earned(abs(ret.grand_total), flt(settings().currency_per_point))
         if back:
             _take_back(orig.customer, back, ret.name, "return")
+    if gift_part > 0:
+        gifts.give_back(orig.orbit_gift_card, gift_part, "refund", ret.name)
+        frappe.db.set_value("Sales Invoice", orig.name, "orbit_gift_refunded", r2(flt(orig.get("orbit_gift_refunded")) + gift_part), update_modified=False)
     receipt = None
     if mode == "credit":
         receipt = _issue_receipt(orig.customer, abs(ret.grand_total), ret.name, ret.orbit_shift).name
     return {"return_invoice": ret.name, "refund": abs(ret.grand_total), "approved_by": approver,
-            "mode": mode, "exchange_receipt": receipt}
+            "mode": mode, "exchange_receipt": receipt, "gift_refund": gift_part,
+            "gift_card": orig.get("orbit_gift_card") if gift_part > 0 else None}
 
 
 def qty_rate(r):
@@ -442,6 +492,13 @@ def _editable_invoice(invoice):
     return si
 
 
+def _restore_gift(si):
+    """A cancelled invoice gives its gift-card payment back to the card (what was already refunded to it stays)."""
+    back = flt(si.get("orbit_gift_amount")) - flt(si.get("orbit_gift_refunded"))
+    if si.get("orbit_gift_card") and back > 0.004:
+        gifts.give_back(si.orbit_gift_card, r2(back), "void-restore", si.name)
+
+
 def _reverse_loyalty(si):
     rows = frappe.db.sql("select customer, coalesce(sum(points),0) from `tabLoyalty Ledger Entry` where sales_invoice=%s group by customer", si.name)
     for cust, pts in rows:
@@ -462,6 +519,7 @@ def void_invoice(invoice, reason, manager=None, pin=None):
     log_approval(who, "Void Invoice", invoice, reason, si.orbit_shift)
     _reverse_loyalty(si)
     si.cancel()
+    _restore_gift(si)
     return {"status": "voided", "invoice": invoice}
 
 
@@ -474,6 +532,8 @@ def edit_invoice(invoice, payload, reason, manager=None, pin=None):
     if not (reason or "").strip():
         frappe.throw(frappe._("Reason is required"))
     si = _editable_invoice(invoice)
+    if flt(si.get("orbit_gift_amount")) > 0:
+        frappe.throw(frappe._("This invoice was paid with a gift card. Edit is blocked. Void it or take a return."))
     who = approver_for("editInvoice", manager, pin)
     p = frappe.parse_json(payload)
     rev = int(si.get("orbit_rev") or 0) + 1
@@ -511,6 +571,8 @@ def invoice_for_edit(invoice):
         blockers.append("returns")
     if frappe.db.exists("POS Exchange Receipt", {"redeemed_in": invoice}):
         blockers.append("exchange")
+    if flt(si.get("orbit_gift_amount")) > 0:
+        blockers.append("gift")
     lines_locked = bool(flt(si.discount_amount)) or any(r.get("orbit_promo") or r.get("serial_no") or r.get("batch_no") or flt(r.discount_amount) for r in si.items)
     return {"invoice": si.name, "shift": si.orbit_shift, "shift_open": sh.status == "Open", "shift_user": sh.user,
             "customer": si.customer, "grand_total": flt(si.grand_total), "rev": int(si.get("orbit_rev") or 0),

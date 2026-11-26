@@ -35,7 +35,8 @@ def _cash_sales(shift):
         join `tabSales Invoice` si on si.name = sip.parent
         where si.orbit_shift=%s and si.docstatus=1 and sip.mode_of_payment in
         (select name from `tabMode of Payment` where type='Cash')""", shift)
-    return flt(row[0][0])
+    from .gifts import cash_gift_sales
+    return flt(row[0][0]) + cash_gift_sales(shift)
 
 
 def expected_cash(shift):
@@ -178,9 +179,11 @@ def z_report(shift):
         where orbit_shift=%s and docstatus=1 and is_return=0""", shift)[0]
     rets = frappe.db.sql("""select count(*), coalesce(sum(grand_total),0) from `tabSales Invoice`
         where orbit_shift=%s and docstatus=1 and is_return=1""", shift)[0]
+    from .gifts import gift_sold
+    gifts_sold = gift_sold(shift)
     return {"shift": shift, "user": doc.user, "opened_at": str(doc.opened_at), "closed_at": str(doc.closed_at or ""),
             "sales_count": sales[0], "sales_total": flt(sales[1]), "returns_count": rets[0],
-            "returns_total": flt(rets[1]), "opening_cash": doc.opening_cash,
+            "returns_total": flt(rets[1]), "gift_sold_count": gifts_sold[0], "gift_sold_total": gifts_sold[1], "opening_cash": doc.opening_cash,
             "expected_cash": None if pending else doc.expected_cash, "counted_cash": doc.counted_cash,
             "difference": None if pending else doc.difference, "approval_status": doc.approval_status}
 
