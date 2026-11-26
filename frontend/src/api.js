@@ -55,7 +55,7 @@ async function mock(method, a) {
   if (method === 'shift.close_shift') { const z = { shift: mockShift.name, expected_cash: mockShift.opening_cash, counted_cash: +a.counted_cash, difference: +a.counted_cash - mockShift.opening_cash }; mockShift = null; return z; }
   if (method === 'sales.lookup') { const c = CATALOG[a.code]; if (!c) throw Object.assign(new Error('not found'), { permanent: true }); return { name: a.code, item_name: c.name, price: c.price, item_group: c.item_group, qty: 1 }; }
   if (method === 'sales.quote') return mockQuote(JSON.parse(a.payload).lines);
-  if (method === 'sales.submit_sale') { const p = JSON.parse(a.payload); if (mockSeen.has(p.txn_id)) return { status: 'duplicate' }; mockSeen.add(p.txn_id); return { status: 'created', sales_invoice: 'SINV-' + mockSeen.size }; }
+  if (method === 'sales.submit_sale') { const p = JSON.parse(a.payload); if (p.lines.some((l) => l.qty === 77)) throw Object.assign(new Error('The price of 6223 is 5, not 1. Your role may not change prices'), { permanent: true }); if (mockSeen.has(p.txn_id)) return { status: 'duplicate' }; mockSeen.add(p.txn_id); return { status: 'created', sales_invoice: 'SINV-' + mockSeen.size }; }
   if (method === 'exchange.active_promotions') return [{ name: 'Buy 2 get 3 chips', type: 'bxgy', buy: 2, get: 3, scope: '6221' }];
   if (method === 'exchange.search_customers') return [];
   if (method === 'exchange.get_receipt') return { invoice: 'SINV-1', is_return: false, company: 'Mock', branch: '', date: '2026-01-01', time: '10:00', cashier: 'x', customer: 'عميل نقدي', lines: [], net_total: 0, discount: 0, taxes: [], grand_total: 0, payments: [], format: 'Standard 80mm', window_days: 14, terms_ar: '', terms_en: '' };

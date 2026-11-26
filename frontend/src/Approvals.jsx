@@ -1,3 +1,4 @@
+import { fail } from './guide.js';
 import { useEffect, useState } from 'react';
 import { api } from './api.js';
 
@@ -5,10 +6,10 @@ import { api } from './api.js';
 export default function Approvals({ L, fmt, onDone }) {
   const [list, setList] = useState([]); const [sel, setSel] = useState(null); const [view, setView] = useState(null);
   const [note, setNote] = useState(''); const [msg, setMsg] = useState(''); const [z, setZ] = useState(null);
-  const load = async () => { try { setList(await api('shift.pending_closes')); } catch (e) { setMsg(e.message); } };
+  const load = async () => { try { setList(await api('shift.pending_closes')); } catch (e) { setMsg(fail(e)); } };
   useEffect(() => { load(); }, []);
-  async function open(name) { setSel(name); setZ(null); setMsg(''); try { setView(await api('shift.pending_close_view', { shift: name })); } catch (e) { setMsg(e.message); } }
-  async function approve() { try { setZ(await api('shift.approve_close', { shift: sel, note })); setView(null); setSel(null); setNote(''); load(); onDone && onDone(); } catch (e) { setMsg(e.message); } }
+  async function open(name) { setSel(name); setZ(null); setMsg(''); try { setView(await api('shift.pending_close_view', { shift: name })); } catch (e) { setMsg(fail(e)); } }
+  async function approve() { try { setZ(await api('shift.approve_close', { shift: sel, note })); setView(null); setSel(null); setNote(''); load(); onDone && onDone(); } catch (e) { setMsg(fail(e)); } }
   return (
     <section className="card" data-testid="approvals">
       <h3>{L('pendingCloses')}</h3>

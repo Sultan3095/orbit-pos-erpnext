@@ -1,3 +1,4 @@
+import { fail } from './guide.js';
 import React, { useState } from 'react';
 import { api } from './api.js';
 
@@ -17,16 +18,16 @@ export default function Returns({ L, branch, onReceipt, onExchange }) {
 
   async function search(e) {
     e && e.preventDefault(); setMsg(''); setInv(null); setDone(null);
-    try { setResults(await api('exchange.search_invoices', { q })); } catch (err) { setMsg(err.message); }
+    try { setResults(await api('exchange.search_invoices', { q })); } catch (err) { setMsg(fail(err)); }
   }
   async function pick(name) {
     setMsg(''); setDone(null);
     try { const d = await api('exchange.invoice_for_return', { invoice: name }); setInv(d); setSel({}); setMode('credit'); }
-    catch (err) { setMsg(err.message); }
+    catch (err) { setMsg(fail(err)); }
   }
   async function reprint(name) { // any closed order, any time: same receipt, print button inside
     setMsg('');
-    try { onReceipt(await api('exchange.get_receipt', { invoice: name })); } catch (err) { setMsg(err.message); }
+    try { onReceipt(await api('exchange.get_receipt', { invoice: name })); } catch (err) { setMsg(fail(err)); }
   }
   const chosen = inv ? inv.lines.filter((l) => sel[l.row] && sel[l.row].qty > 0) : [];
   const hasPromo = chosen.some((l) => l.promo);
@@ -53,7 +54,7 @@ export default function Returns({ L, branch, onReceipt, onExchange }) {
       setDone(r); setInv(null); setResults(null);
       const rc = await api('exchange.get_receipt', { invoice: r.return_invoice });
       onReceipt(rc);
-    } catch (err) { setMsg(err.message); }
+    } catch (err) { setMsg(fail(err)); }
   }
 
   return (

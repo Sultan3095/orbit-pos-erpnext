@@ -16,6 +16,12 @@ assert.deepEqual(q2.list().map((p) => p.txn_id), ['y']);
 const st = mem(); const q3 = createQueue(st); q3.push({ txn_id: 'bad' }); q3.push({ txn_id: 'ok' });
 await q3.flush(async (p) => { if (p.txn_id === 'bad') throw Object.assign(new Error('x'), { permanent: true }); return { status: 'created' }; });
 assert.equal(q3.list().length, 0); assert.equal(JSON.parse(st.getItem('orbit_queue_failed')).length, 1);
+// a refused sale keeps its reason, can be retried or dismissed, and old-format failed rows still load
+const q4 = createQueue(mem()); q4.push({ txn_id: 'r1' });
+await q4.flush(async () => { throw Object.assign(new Error('Shift is not open'), { permanent: true }); });
+assert.equal(q4.failed()[0].reason, 'Shift is not open'); assert.equal(q4.failed()[0].payload.txn_id, 'r1');
+assert.ok(q4.retry('r1')); assert.equal(q4.failed().length, 0); assert.equal(q4.list()[0].txn_id, 'r1');
+const old = mem(); old.setItem('orbit_queue_failed', JSON.stringify([{ txn_id: 'o1' }])); assert.equal(createQueue(old).failed()[0].payload.txn_id, 'o1');
 console.log('queue tests passed');
 
 // readable server errors

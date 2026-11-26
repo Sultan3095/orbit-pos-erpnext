@@ -1,3 +1,4 @@
+import { fail } from './guide.js';
 import { useState } from 'react';
 import { api } from './api.js';
 
@@ -7,25 +8,25 @@ export default function EditInvoice({ L, fmt, perms, onReceipt, hint = () => {} 
   const [qty, setQty] = useState({}); const [cash, setCash] = useState(''); const [card, setCard] = useState(''); const [ref, setRef] = useState('');
   const [reason, setReason] = useState(''); const [pin, setPin] = useState({ manager: '', pin: '' }); const [msg, setMsg] = useState('');
   const needPin = inv && !(perms.editInvoice === 'Y');
-  async function search() { setMsg(''); try { setRes(await api('exchange.search_invoices', { q })); } catch (e) { setMsg(e.message); } }
+  async function search() { setMsg(''); try { setRes(await api('exchange.search_invoices', { q })); } catch (e) { setMsg(fail(e)); } }
   async function pick(name) {
     setMsg(''); try {
       const d = await api('sales.invoice_for_edit', { invoice: name }); setInv(d);
       setQty(Object.fromEntries(d.lines.map((l, i) => [i, l.qty])));
       const m = (k) => d.payments.filter((p) => p.method === k).reduce((a, p) => a + p.amount, 0);
       setCash(String(m('Cash'))); setCard(String(m('Credit Card') || 0)); setRef((d.payments.find((p) => p.ref) || {}).ref || '');
-    } catch (e) { setMsg(e.message); }
+    } catch (e) { setMsg(fail(e)); }
   }
   const approver = () => (needPin ? { manager: pin.manager, pin: pin.pin } : {});
-  async function reopen() { if (reason.trim().length < 3) { hint('REASON'); return; } try { await api('shift.reopen_shift', { shift: inv.shift, reason, ...approver() }); setMsg(L('reopened')); await pick(inv.invoice); } catch (e) { setMsg(e.message); } }
+  async function reopen() { if (reason.trim().length < 3) { hint('REASON'); return; } try { await api('shift.reopen_shift', { shift: inv.shift, reason, ...approver() }); setMsg(L('reopened')); await pick(inv.invoice); } catch (e) { setMsg(fail(e)); } }
   async function save() {
     if (reason.trim().length < 3) { hint('REASON'); return; }
     const lines = inv.lines_locked ? inv.lines.map((l) => ({ itemId: l.itemId, qty: l.qty, price: l.price })) : inv.lines.map((l, i) => ({ itemId: l.itemId, qty: Number(qty[i]), price: l.price })).filter((l) => l.qty > 0);
     const payments = [{ method: 'Cash', amount: Number(cash) || 0 }, { method: 'Credit Card', amount: Number(card) || 0, ref }].filter((p) => p.amount > 0);
     try { const r = await api('sales.edit_invoice', { invoice: inv.invoice, payload: JSON.stringify({ lines, payments }), reason, ...approver() }); setMsg(L('edited') + ' ' + r.sales_invoice); setInv(null); setRes([]); if (onReceipt) onReceipt(await api('exchange.get_receipt', { invoice: r.sales_invoice })); }
-    catch (e) { setMsg(e.message); }
+    catch (e) { setMsg(fail(e)); }
   }
-  async function voidIt() { if (reason.trim().length < 3) { hint('REASON'); return; } try { await api('sales.void_invoice', { invoice: inv.invoice, reason, ...approver() }); setMsg(L('voided')); setInv(null); setRes([]); } catch (e) { setMsg(e.message); } }
+  async function voidIt() { if (reason.trim().length < 3) { hint('REASON'); return; } try { await api('sales.void_invoice', { invoice: inv.invoice, reason, ...approver() }); setMsg(L('voided')); setInv(null); setRes([]); } catch (e) { setMsg(fail(e)); } }
   return (
     <section className="card" data-testid="edit-screen">
       <h3>{L('editTitle')}</h3>

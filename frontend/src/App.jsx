@@ -8,7 +8,7 @@ import Approvals from './Approvals.jsx';
 import EditInvoice from './EditInvoice.jsx';
 import Gifts, { GiftShiftBlock } from './Gifts.jsx';
 import Coupons from './Coupons.jsx';
-import { showGuide, closeGuide, guideOff, setGuideOff } from './guide.js';
+import { showGuide, closeGuide, guideOff, setGuideOff, fail, ctx } from './guide.js';
 
 const queue = createQueue(window.localStorage);
 const TERMINAL = localStorage.getItem('orbit_terminal') || (localStorage.setItem('orbit_terminal', 'T' + Math.random().toString(36).slice(2, 6)), localStorage.getItem('orbit_terminal'));
@@ -50,10 +50,12 @@ export default function App() {
   const [giftAmt, setGiftAmt] = useState('');
   const [gift, setGift] = useState(null);                  // checked gift card applied to this sale
   const [pending, setPending] = useState(queue.list().length);
+  const [failed, setFailed] = useState(queue.failed());
   const counter = useRef(Number(localStorage.getItem('orbit_counter') || 0));
   const L = (k) => t(lang, k);
   const [gOff, setGOff] = useState(false);
   useEffect(() => { setGOff(guideOff(me)); }, [me]);
+  ctx.lang = lang; ctx.user = me;
   const hint = (key, force) => showGuide(key, { lang, user: me, force });
 
   useEffect(() => {
@@ -66,7 +68,7 @@ export default function App() {
   useEffect(() => { api('shift.my_permissions').then((r) => { setPerms(r.perms || {}); if (r.user) { setMe(r.user); setTheme(normTheme(r.theme || localStorage.getItem('orbit_theme:' + r.user) || localStorage.getItem('orbit_theme'))); } }).catch(() => setPerms({})); }, []);
   const refreshShift = useCallback(async () => { try { setShift(await api('shift.current_shift')); setOnline(true); } catch (e) { setOnline(false); } }, []);
   useEffect(() => { refreshShift(); }, [refreshShift]);
-  useEffect(() => { if (shift) api('exchange.active_promotions').then(setPromos).catch(() => setPromos([])); }, [shift]);
+  useEffect(() => { if (shift) api('exchange.active_promotions').then((r) => { setPromos(r); localStorage.setItem('orbit_promos', JSON.stringify(r)); }).catch(() => setPromos(JSON.parse(localStorage.getItem('orbit_promos') || '[]'))); }, [shift]);
   useEffect(() => {
     if (custQ.trim().length < 2) { setCustList([]); return; }
     let live = true;
@@ -80,6 +82,7 @@ export default function App() {
       setOnline(true);
     } catch (e) { setOnline(false); }
     setPending(queue.list().length);
+    const f = queue.failed(); setFailed((old) => { if (f.length > old.length) setTimeout(() => showGuide('REJECTED', { lang: ctx.lang, user: ctx.user, force: true }), 50); return f; });
   }, []);
   useEffect(() => { const id = setInterval(flush, 15000); window.addEventListener('online', flush); return () => { clearInterval(id); window.removeEventListener('online', flush); }; }, [flush]);
 
@@ -90,7 +93,7 @@ export default function App() {
     api('sales.quote', { payload: JSON.stringify({ lines: cart.map(({ itemId, group, qty, price }) => ({ itemId, group, qty, price })), coupon: couponCode || undefined, customer: customer ? customer.name : undefined, shift: shift ? shift.name : undefined }) })
       .then((q) => { if (live) setQuote(q); }).catch((err) => {
         if (!live) return;
-        if (couponCode && err.permanent) { setMsg(err.message); setCouponCode(''); hint('COUPON'); return; }   // a coupon the server refuses is dropped, with the reason
+        if (couponCode && err.permanent) { setMsg(fail(err)); setCouponCode(''); hint('COUPON'); return; }   // a coupon the server refuses is dropped, with the reason
         setQuote(localQuote(cart));
       });
     return () => { live = false; };
@@ -128,29 +131,32 @@ export default function App() {
   const paid = (Number(cashPaid) || 0) + (Number(cardPaid) || 0) + credit + giftCover;
   const remaining = Math.max(0, total - paid);
   const change = Math.max(0, paid - total);
-  const canPay = cart.length && quote && paid + 0.005 >= total && shift && serialsOk;
+  // offline the screen has no server prices: when an offer or coupon could change the total, selling would charge
+  // the wrong amount, so Pay waits for the connection
+  const offlineBlock = !!(quote && quote.local && (couponCode || promoMayApply(promos, cart)));
+  const canPay = cart.length && quote && paid + 0.005 >= total && shift && serialsOk && !offlineBlock;
   async function applyReceipt(name) {
     setMsg('');
     try {
       const info = await api('exchange.exchange_receipt_info', { name });
       if (info.status !== 'Open') { setMsg(`${name}: ${info.status}`); return; }
       setXr(info); setXrCode('');
-    } catch (err) { setMsg(err.message); }
+    } catch (err) { setMsg(fail(err)); }
   }
   async function applyCoupon() {
     setMsg('');
     if (!couponIn.trim()) return;
     try { await api('sales.quote', { payload: JSON.stringify({ lines: cart.map(({ itemId, group, qty, price }) => ({ itemId, group, qty, price })), coupon: couponIn.trim(), customer: customer ? customer.name : undefined, shift: shift.name }) }); setCouponCode(couponIn.trim().toUpperCase()); setCouponIn(''); setMsg(L('cpApplied')); }
-    catch (err) { setMsg(err.message); hint('COUPON'); }
+    catch (err) { setMsg(fail(err)); hint('COUPON'); }
   }
   async function applyGift() {
     setMsg('');
     try { const g = await api('gifts.check_gift_card', { card_no: giftNo }); if (g.status !== 'active') { setMsg(giftNo + ': ' + L('giftState_' + g.status)); hint('GIFT'); return; } setGift(g); }
-    catch (err) { setMsg(err.message); hint('GIFT'); }
+    catch (err) { setMsg(fail(err)); hint('GIFT'); }
   }
   async function newCustomer() {
     try { const c = await api('exchange.create_customer', { customer_name: newCust.name, mobile_no: newCust.phone }); setCustomer(c); setNewCust(null); setCustQ(''); setCustList([]); }
-    catch (err) { setMsg(err.message); }
+    catch (err) { setMsg(fail(err)); }
   }
 
   async function pay() {
@@ -172,7 +178,7 @@ export default function App() {
     if (res && res.sales_invoice) { try { setRc(await api('exchange.get_receipt', { invoice: res.sales_invoice })); } catch (e) {} }
   }
 
-  async function openShift() { try { setShift(await api('shift.open_shift', { pos_profile: localStorage.getItem('orbit_profile') || 'POS', opening_cash: opening, terminal: TERMINAL })); } catch (e) { setMsg(e.message); } }
+  async function openShift() { try { setShift(await api('shift.open_shift', { pos_profile: localStorage.getItem('orbit_profile') || 'POS', opening_cash: opening, terminal: TERMINAL })); } catch (e) { setMsg(fail(e)); } }
   async function saveCashMove() {
     const amount = Number(cm.amount);
     if (!(amount > 0)) { setCm({ ...cm, err: L('invalidAmount') }); return; }
@@ -184,10 +190,10 @@ export default function App() {
       setMsg((cm.direction === 'Out' ? L('cashOut') : L('cashIn')) + ': ' + fmt(amount) + ' — ' + cm.reason.trim()); setCm(null);
     } catch (e) {
       const needs = /approval required|manager|PIN/i.test(e.message || '');
-      setCm({ ...cm, needPin: cm.needPin || needs, err: e.message });
+      setCm({ ...cm, needPin: cm.needPin || needs, err: fail(e) });
     }
   }
-  async function closeShift() { if (String(counted).trim() === '' || !(Number(counted) >= 0)) { hint('COUNTED'); return; } try { const r = await api('shift.close_shift', { shift: shift.name, counted_cash: counted }); if (r.pending) { setZ(null); setMsg(L('closePending')); } else setZ(r); setShift(null); } catch (e) { setMsg(e.message); } }
+  async function closeShift() { if (String(counted).trim() === '' || !(Number(counted) >= 0)) { hint('COUNTED'); return; } try { const r = await api('shift.close_shift', { shift: shift.name, counted_cash: counted }); if (r.pending) { setZ(null); setMsg(L('closePending')); } else setZ(r); setShift(null); } catch (e) { setMsg(fail(e)); } }
 
   return (
     <div className="app">
@@ -195,6 +201,7 @@ export default function App() {
         <b>{L('app')}</b>
         <span className={'pill ' + (online ? 'ok' : 'bad')} data-testid="net">{online ? L('online') : L('offline')}</span>
         <span className="pill" data-testid="pending">{L('queued')}: {pending}</span>
+        {failed.length > 0 && <span className="pill bad" data-testid="rejected-pill">{L('rejectedSales')}: {failed.length}</span>}
         <button onClick={flush}>{L('sync')}</button>
         <span className="tabs">
           <button className={view === 'sale' ? 'on' : ''} onClick={() => setView('sale')} data-testid="tab-sale">{L('tabSale')}</button>
@@ -210,6 +217,16 @@ export default function App() {
         <label>{L('lang')} <select value={lang} onChange={(e) => setLang(e.target.value)} data-testid="lang"><option value="ar">العربية</option><option value="en">English</option></select></label>
         <a href="#display" target="_blank" rel="noreferrer">{L('customerScreen')}</a>
       </header>
+      {failed.length > 0 && (
+        <div className="msg" data-testid="rejected" role="alert">
+          <b>{L('rejectedTitle')}</b>
+          {failed.map((f) => (
+            <div key={f.payload.txn_id} data-testid="rejected-row">
+              <span dir="ltr">{f.payload.txn_id}</span> — {f.reason || L('rejectedNoReason')}{' '}
+              <button onClick={() => { queue.retry(f.payload.txn_id); setFailed(queue.failed()); setPending(queue.list().length); flush(); }} data-testid="rejected-retry">{L('retry')}</button>{' '}
+              <button onClick={() => { queue.dismiss(f.payload.txn_id); setFailed(queue.failed()); }} data-testid="rejected-dismiss">{L('dismiss')}</button>
+            </div>))}
+        </div>)}
 
       {!shift ? (
         <section className="card" data-testid="noshift">
@@ -280,7 +297,7 @@ export default function App() {
             <label>{L('card')} <input value={cardPaid} onChange={(e) => setCardPaid(e.target.value)} inputMode="decimal" data-testid="card" /></label>
             {Number(cardPaid) > 0 && <label>{L('cardRef')} <input value={cardRef} onChange={(e) => setCardRef(e.target.value)} data-testid="card-ref" /></label>}
             <div>{L('remaining')}: {fmt(remaining)} · {L('change')}: {fmt(change)}</div>
-            <span data-testid="pay-wrap" onClick={() => { if (canPay) return; hint(!cart.length ? 'EMPTY_CART' : !serialsOk ? 'SERIALS' : 'UNDERPAID'); }}>
+            <span data-testid="pay-wrap" onClick={() => { if (canPay) return; hint(!cart.length ? 'EMPTY_CART' : !serialsOk ? 'SERIALS' : offlineBlock ? 'OFFLINE_PROMO' : 'UNDERPAID', offlineBlock); }}>
               <button className="primary" disabled={!canPay} style={canPay ? undefined : { pointerEvents: 'none' }} onClick={() => { closeGuide(); pay(); }} data-testid="pay">{L('pay')}</button></span>
             {' '}<label className="muted"><input type="checkbox" checked={!gOff} onChange={(e) => { setGuideOff(me, !e.target.checked); setGOff(!e.target.checked); }} data-testid="guide-switch" /> {L('guideOn')}</label>
             <hr />
@@ -324,5 +341,11 @@ function promoText(p, L) {
 function localQuote(cart) {
   const lines = cart.map((l) => ({ ...l, gross: l.qty * l.price, promoDisc: 0, net: l.qty * l.price }));
   const subtotal = lines.reduce((s, l) => s + l.net, 0);
-  return { lines, subtotal, invoice_discount: 0, net_before_tax: subtotal };
+  return { lines, subtotal, invoice_discount: 0, net_before_tax: subtotal, local: true };
+}
+
+// true when an active offer could apply to something in the cart (conservative: an unknown scope counts)
+function promoMayApply(promos, cart) {
+  return (promos || []).some((p) => p.scope_type === 'all' || p.min_total > 0 ||
+    cart.some((l) => (p.scope_type === 'item' && p.scope === l.itemId) || (p.scope_type === 'group' && p.scope === l.group)));
 }

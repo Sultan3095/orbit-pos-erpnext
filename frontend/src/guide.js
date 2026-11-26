@@ -11,6 +11,8 @@ export const ISSUES = {
   COUPON: { sel: ['[data-testid=coupon-code]'], short: L('الكوبون مش مقبول.', 'The coupon was not accepted.'), long: L('الكوبون ممكن يكون منتهي أو مقفول أو الفاتورة أقل من الحد الأدنى، أو محتاج عميل محدد. راجع الكوبون من تبويب الكوبونات.', 'The coupon may be expired, switched off, the invoice may be under its minimum, or it needs a named customer. Review it on the Coupons tab.') },
   REASON: { sel: ['[data-testid=cm-reason]', '[data-testid=ed-reason]', '[data-testid=ed-reason-reopen]', '[data-testid=gw-reason]'], short: L('السبب ناقص.', 'The reason is missing.'), long: L('اكتب السبب (3 حروف على الأقل). بيتسجل في سجل المراجعة.', 'Write the reason (3+ characters). It is saved in the audit log.') },
   COUNTED: { sel: ['[data-testid=counted]'], short: L('اكتب الكاش اللي عديته.', 'Enter the cash you counted.'), long: L('عدّ الكاش اللي في الدرج واكتب المبلغ هنا قبل ما تقفل الشيفت. القفل أعمى: مش هتشوف المتوقع.', 'Count the cash in the drawer and type the amount here before closing the shift. The close is blind: you will not see the expected amount.') },
+  REJECTED: { sel: ['[data-testid=rejected]'], short: L('في عملية بيع اتقفلت ومتسجلتش.', 'A sale was refused and NOT recorded.'), long: L('العميل دفع لكن السيرفر رفض الفاتورة (مثلا الشيفت اتقفل أو السعر اتغير). اقرا السبب في المستطيل الأحمر، وبلّغ المدير. بعد حل السبب دوس إعادة المحاولة، أو تجاهل لو اتسجلت بطريقة تانية.', 'The customer paid but the server refused the invoice (for example the shift was closed or a price changed). Read the reason in the red box and tell the manager. After the cause is fixed press Retry, or Dismiss if it was recorded another way.') },
+  OFFLINE_PROMO: { sel: ['[data-testid=pay-wrap]'], short: L('مفيش نت والعروض مش هتتحسب.', 'Offline: offers cannot be calculated.'), long: L('في عرض أو كوبون ممكن ينطبق على السلة، ومفيش اتصال فمش هينفع نحسب الإجمالي الصح. استنى الاتصال يرجع، أو شيل الأصناف اللي عليها عرض.', 'An offer or coupon may apply to this cart and there is no connection, so the right total cannot be calculated. Wait for the connection, or remove the items that have an offer.') },
 };
 let cur = null;
   function mascotSVG() {
@@ -36,17 +38,18 @@ let cur = null;
     document.head.appendChild(s);
   }
   function close() { const g = document.getElementById('guide'); if (g) g.remove(); cur = null; }
-const find = (sels) => { for (const s of sels) { const e = document.querySelector(s); if (e && e.offsetParent !== null) return e; } return null; };
+const find = (sels) => { for (const s of sels) { const all = [...document.querySelectorAll(s)].filter((x) => x.offsetParent !== null); const e = s === '.msg' ? all[all.length - 1] : all[0]; if (e && e.offsetParent !== null) return e; } return null; };
 const keyOf = (u, k) => 'orbit_guide_seen:' + (u || '') + ':' + k;
 export const guideOff = (user) => localStorage.getItem('orbit_guide_off:' + (user || '')) === '1';
 export const setGuideOff = (user, off) => { localStorage.setItem('orbit_guide_off:' + (user || ''), off ? '1' : '0'); if (off) close(); else Object.keys(localStorage).filter((k) => k.startsWith('orbit_guide_seen:' + (user || '') + ':')).forEach((k) => localStorage.removeItem(k)); };
 export const closeGuide = close;
-export function showGuide(key, { lang, user, force } = {}) {
-  const I = ISSUES[key]; if (!I) return false;
+export function showGuide(key, { lang, user, force, issue } = {}) {
+  const I = issue || ISSUES[key]; if (!I) return false;
   if (!force && (guideOff(user) || localStorage.getItem(keyOf(user, key)))) return false;
   setTimeout(() => {
     const target = find(I.sel); if (!target) return;
     ensureCss(); close();
+    try { target.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
     const lg = lang === 'en' ? 'en' : 'ar'; const tx = (o) => o[lg];
     const r = target.getBoundingClientRect(); const W = window.innerWidth, H = window.innerHeight;
     const g = document.createElement('div'); g.id = 'guide'; g.setAttribute('data-guide', key); g.dir = lg === 'ar' ? 'rtl' : 'ltr';
@@ -68,4 +71,45 @@ export function showGuide(key, { lang, user, force } = {}) {
     cur = key;
   }, 120);
   return true;
+}
+
+// ---- Any error: the Captain appears, points at the message and explains it in plain words.
+// Known server messages get a specific Arabic line and a "what to do" step; anything else gets the message itself
+// plus a generic next step, so no error is ever shown without him.
+export const ctx = { lang: 'ar', user: '' };
+const E = (re, ar, arLong, en, enLong) => ({ re, ar, arLong, en, enLong });
+const PATTERNS = [
+  E(/may not change prices|price of .* is/i, 'السعر مختلف عن قائمة الأسعار.', 'سعر الصنف على الشاشة غير سعره في قائمة الأسعار، وصلاحيتك لا تسمح بتغيير السعر. امسح الصنف من جديد، أو اطلب من المدير يغيّر السعر.', 'The price differs from the price list.', 'The price on screen is not the price list price and your role may not change prices. Scan the item again or ask a manager.'),
+  E(/Shift is not open|no open shift|Open a shift/i, 'مفيش شيفت مفتوح.', 'لازم يكون عندك شيفت مفتوح عشان البيع أو المرتجع. افتح شيفت الأول بالكاش اللي في الدرج.', 'There is no open shift.', 'You need an open shift to sell or return. Open one first with the cash in the drawer.'),
+  E(/belongs to another user/i, 'الشيفت ده بتاع مستخدم تاني.', 'مينفعش تشتغل على شيفت مستخدم تاني. افتح شيفتك أو اطلب من المدير.', 'This shift belongs to another user.', 'You cannot work on another user\'s shift. Open your own or ask a manager.'),
+  E(/Not permitted|may not|not a POS Manager|cannot approve/i, 'مش مسموح لك بالعملية دي.', 'صلاحيتك مش بتسمح بالخطوة دي. اطلب من المدير ينفذها أو يديك موافقة بالرقم السري.', 'This is not allowed for your role.', 'Your role cannot do this step. Ask a manager to do it or to approve it with his PIN.'),
+  E(/Manager approval required|Wrong manager PIN/i, 'محتاج موافقة المدير.', 'اكتب اسم المدير ورقمه السري الصح في الخانتين اللي ظهروا.', 'A manager approval is needed.', 'Type the manager user and his correct PIN in the two fields shown.'),
+  E(/less than total/i, 'المدفوع أقل من الإجمالي.', 'المبلغ المدفوع لا يغطي إجمالي الفاتورة. زوّد الكاش أو الكارت لحد ما المتبقي يبقى صفر.', 'The payment is less than the total.', 'The amount paid does not cover the invoice. Add cash or card until Remaining is zero.'),
+  E(/not on this POS Profile|amount must be more than zero/i, 'طريقة الدفع غير صحيحة.', 'طريقة الدفع غير موجودة في ملف نقطة البيع أو مبلغها صفر. استخدم كاش أو كارت بمبلغ أكبر من صفر.', 'The payment method is not valid.', 'The method is not on the POS Profile or its amount is zero. Use cash or card with an amount above zero.'),
+  E(/Exchange receipt .* (is already|not found|expired)/i, 'إيصال الاستبدال مش صالح.', 'الإيصال ده اتستخدم قبل كده أو منتهي أو رقمه غلط. الإيصال بيتستخدم مرة واحدة بس.', 'The exchange receipt is not usable.', 'It was already used, has expired or the number is wrong. An exchange receipt works only once.'),
+  E(/Too many wrong gift card/i, 'محاولات كتير غلط.', 'اتكتب رقم كارت هدية غلط أكتر من مرة. استنى كام دقيقة وجرب بالرقم الصح من الكارت نفسه.', 'Too many wrong tries.', 'Too many wrong gift card numbers. Wait a few minutes and try the number printed on the card.'),
+  E(/named customer to use loyalty/i, 'اختار عميل بالاسم.', 'نقاط الولاء بتتصرف لعميل بالاسم بس، مش للعميل النقدي. اختار العميل الأول.', 'Choose a named customer.', 'Loyalty points belong to a named customer, not the cash customer. Pick the customer first.'),
+  E(/already have an open shift/i, 'عندك شيفت مفتوح بالفعل.', 'مينفعش تفتح شيفتين. كمّل على الشيفت المفتوح أو اقفله الأول.', 'You already have an open shift.', 'You cannot open two shifts. Continue on the open one or close it first.'),
+  E(/needs? a named customer|coupon/i, 'الكوبون مش مقبول.', 'الكوبون ممكن يكون منتهي أو مقفول أو الفاتورة أقل من الحد الأدنى أو محتاج عميل محدد.', 'The coupon was not accepted.', 'It may be expired, off, the invoice may be under its minimum, or it needs a named customer.'),
+  E(/gift card/i, 'في مشكلة في كارت الهدية.', 'راجع رقم الكارت. لازم يكون مباع وغير منتهي وغير ملغي وفيه رصيد.', 'There is a problem with the gift card.', 'Check the number. The card must be sold, not expired, not cancelled and have a balance.'),
+  E(/needed|insufficient|not enough stock|negative stock/i, 'المخزون مش كفاية.', 'الكمية المطلوبة أكبر من الموجود في المخزن. قلل الكمية أو استلم بضاعة في ERPNext.', 'Not enough stock.', 'The quantity is more than what is on hand. Lower it or receive stock in ERPNext.'),
+  E(/Item not found/i, 'الصنف مش موجود.', 'راجع الباركود أو الكود. لو الصنف جديد لازم يتضاف في ERPNext الأول.', 'Item not found.', 'Check the barcode or code. A new item must be added in ERPNext first.'),
+  E(/after the window|window/i, 'الفاتورة خارج مدة المرتجع.', 'المرتجع بعد المدة المسموحة يحتاج موافقة المدير.', 'The invoice is outside the return window.', 'A return after the allowed days needs a manager approval.'),
+  E(/Reason|reason/, 'السبب ناقص.', 'اكتب السبب (3 حروف على الأقل). بيتسجل في سجل المراجعة.', 'The reason is missing.', 'Write the reason (3+ characters). It is saved in the audit log.'),
+  E(/Server error|network|Failed to fetch|offline/i, 'مفيش اتصال بالسيرفر.', 'الاتصال بالسيرفر وقع. العمليات بتتحفظ على الجهاز وهتتبعت لوحدها لما الاتصال يرجع.', 'The server cannot be reached.', 'The connection dropped. Sales are saved on this device and are sent automatically when it is back.'),
+];
+export function explain(m) {
+  const msg = String(m || '');
+  const hit = PATTERNS.find((p) => p.re.test(msg));
+  const unknownAr = 'حصلت مشكلة. اقرا الرسالة اللي ظهرت. لو اتكررت صوّر الشاشة وابعتها للمدير.';
+  const unknownEn = 'Something went wrong. Read the message shown. If it repeats, take a screenshot and send it to the manager.';
+  return { sel: ['.msg', '[data-testid=msg]', 'header'],
+    short: L(hit ? hit.ar : 'حصلت مشكلة.', hit ? hit.en : 'Something went wrong.'),
+    long: L((hit ? hit.arLong : unknownAr) + '\n' + msg, (hit ? hit.enLong : unknownEn) + '\n' + msg) };
+}
+/** Use in place of `setMsg(e.message)`: shows the Captain with the explanation and returns the message text. */
+export function fail(e) {
+  const m = (e && e.message) || String(e || '');
+  showGuide('ERROR', { ...ctx, force: true, issue: explain(m) });
+  return m;
 }

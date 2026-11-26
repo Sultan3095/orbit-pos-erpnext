@@ -5,15 +5,24 @@ from .common import require_pos_user, verify_manager_pin, log_approval, settings
 
 @frappe.whitelist()
 def open_shift(pos_profile, opening_cash=0, terminal=None, shared=0, branch=None):
-    """One open shift per user. With shared=1, other terminals can join the same shift by passing its name to join_shift."""
+    """One open shift per user. shared=1 lets other users sell on this shift (managers only)."""
     require_pos_user()
+    # one request at a time per user: a double click cannot create two open shifts
+    frappe.db.sql("select name from `tabUser` where name=%s for update", frappe.session.user)
     if not frappe.db.exists("POS Profile", pos_profile):
         # the UI has no profile picker yet: fall back to the only enabled profile
         profiles = frappe.get_all("POS Profile", filters={"disabled": 0}, pluck="name")
         if len(profiles) != 1:
             frappe.throw(frappe._("POS Profile {0} not found").format(pos_profile))
         pos_profile = profiles[0]
-    existing = frappe.db.get_value("POS Shift", {"user": frappe.session.user, "status": "Open"}, "name")
+    if branch and not frappe.db.exists("Branch", branch):
+        frappe.throw(frappe._("Branch {0} not found").format(branch))
+    if int(shared or 0) and not can("approve"):
+        frappe.throw(frappe._("Only a manager can open a shared shift"), frappe.PermissionError)
+    if flt(opening_cash) < 0:
+        frappe.throw(frappe._("Opening cash cannot be negative"))
+    existing = frappe.db.sql("select name from `tabPOS Shift` where user=%s and status='Open' limit 1 for update", frappe.session.user)
+    existing = existing[0][0] if existing else None
     if existing:
         frappe.throw(frappe._("You already have an open shift: {0}").format(existing))
     doc = frappe.get_doc({"doctype": "POS Shift", "user": frappe.session.user, "pos_profile": pos_profile,
@@ -54,8 +63,11 @@ def cash_movement(shift, direction, amount, reason, manager=None, pin=None):
     amount = flt(amount)
     if direction not in ("In", "Out") or amount <= 0 or not reason:
         frappe.throw(frappe._("Direction, positive amount and reason are required"))
-    if frappe.db.get_value("POS Shift", shift, "status") != "Open":
+    sh = frappe.db.get_value("POS Shift", shift, ["status", "user", "shared_shift"], as_dict=True)
+    if not sh or sh.status != "Open":
         frappe.throw(frappe._("Shift is closed"))
+    if sh.user != frappe.session.user and not sh.shared_shift and not can("viewOtherShifts"):
+        frappe.throw(frappe._("This shift belongs to another user"), frappe.PermissionError)
     approved = None
     from orbit_pos.api.common import settings
     if direction == "Out" and perm("cashOutAbove") != "Y" and amount > flt(settings().cashier_cash_out_limit):
@@ -91,7 +103,7 @@ def close_shift(shift, counted_cash, note=None):
         doc.expected_cash = exp
         doc.approval_status = "Auto"
         doc.save()
-        return z_report(shift)
+        return _z_report(shift)
     doc.sealed_expected = exp
     doc.expected_cash = None
     doc.approval_status = "Pending"
@@ -140,7 +152,7 @@ def approve_close(shift, note=None, manager=None, pin=None):
     doc.approval_note = (note or "").strip()
     doc.save()
     log_approval(who, "Close Approval", shift, f"expected {doc.expected_cash} counted {doc.counted_cash} diff {diff}", shift)
-    return z_report(shift)
+    return _z_report(shift)
 
 
 @frappe.whitelist()
@@ -171,8 +183,7 @@ def reopen_shift(shift, reason, manager=None, pin=None):
     return {"shift": shift, "status": "Open", "reopen_count": doc.reopen_count}
 
 
-@frappe.whitelist()
-def z_report(shift):
+def _z_report(shift):
     doc = frappe.get_doc("POS Shift", shift)
     pending = doc.approval_status == "Pending"
     sales = frappe.db.sql("""select count(*), coalesce(sum(grand_total),0) from `tabSales Invoice`
@@ -187,6 +198,21 @@ def z_report(shift):
             "returns_total": flt(rets[1]), "gift_sold_count": gifts_sold[0], "gift_sold_total": gifts_sold[1], "gift_by_value": sg["by_value"], "gift_sold_cash": sg["sold_cash"], "gift_redeemed": sg["redeemed"], "opening_cash": doc.opening_cash,
             "expected_cash": None if pending else doc.expected_cash, "counted_cash": doc.counted_cash,
             "difference": None if pending else doc.difference, "approval_status": doc.approval_status}
+
+
+@frappe.whitelist()
+def z_report(shift):
+    """Z report of one shift: its owner, or a user who may view other shifts. Expected cash and the difference
+    stay hidden from users who may not see them."""
+    require_pos_user()
+    doc = frappe.get_doc("POS Shift", shift)
+    if doc.user != frappe.session.user and not can("viewOtherShifts"):
+        frappe.throw(frappe._("Not permitted"), frappe.PermissionError)
+    out = _z_report(shift)
+    if not can("seeExpected"):
+        out["expected_cash"] = None
+        out["difference"] = None
+    return out
 
 
 @frappe.whitelist()

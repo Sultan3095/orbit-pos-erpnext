@@ -54,9 +54,17 @@ try {
   assert.equal(await p.$('[data-testid=cm-dialog]'), null); assert.ok((await txt('[data-testid=msg]')).includes('50.00'));
   await p.click('[data-testid=cash-out]'); await p.type('[data-testid=cm-amount]', '300'); await p.type('[data-testid=cm-reason]', 'big');
   await p.click('[data-testid=cm-save]'); await p.waitForSelector('[data-testid=cm-pin]'); await p.screenshot({ path: OUT + '/6-cashout-pin.png' });
+  await p.waitForSelector('#guide[data-guide=ERROR]'); await p.screenshot({ path: OUT + '/guide-6-any-error-en.png' }); await p.click('#guide .gman'); await p.waitForSelector('#guide [data-g=ok]'); await p.screenshot({ path: OUT + '/guide-7-any-error-explain-en.png' }); await p.click('#guide [data-g=ok]'); await sleep(200);
   await p.click('[data-testid=cash-in]'); // reopen as cash in resets the dialog
   await p.type('[data-testid=cm-amount]', '5'); await p.type('[data-testid=cm-reason]', 'float'); await p.click('[data-testid=cm-save]'); await new Promise((r) => setTimeout(r, 400));
   assert.equal(await p.$('[data-testid=cm-dialog]'), null);
+  // a queued sale the server refuses stays visible, with its reason, and the Captain points at it
+  await p.evaluate(() => { localStorage.setItem('orbit_queue', JSON.stringify([{ txn_id: 'BAD-1', shift: 'SHIFT-00001', lines: [{ itemId: '6223', qty: 77, price: 1 }], payments: [] }])); });
+  await p.evaluate(() => [...document.querySelectorAll('header button')].find((b) => /Sync|مزامنة/.test(b.textContent)).click());
+  await p.waitForSelector('#guide[data-guide=REJECTED]'); await p.screenshot({ path: OUT + '/guide-8-rejected-sale-en.png' });
+  assert.ok((await txt('[data-testid=rejected]')).includes('may not change prices'), 'reason shown');
+  await p.click('#guide [data-g=x]'); await sleep(200); await p.click('[data-testid=rejected-dismiss]'); await sleep(200);
+  assert.equal(await p.$('[data-testid=rejected]'), null);
   await p.click('[data-testid=close]'); await p.waitForSelector('#guide[data-guide=COUNTED]'); await p.screenshot({ path: OUT + '/guide-5-counted-en.png' }); await p.click('#guide [data-g=x]'); await sleep(200);
   await p.type('[data-testid=counted]', '0'); await p.click('[data-testid=close]'); await p.waitForSelector('[data-testid=z]');
   console.log('UI e2e (mock API) PASSED');
