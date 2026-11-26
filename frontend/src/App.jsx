@@ -176,7 +176,7 @@ export default function App() {
   async function saveCashMove() {
     const amount = Number(cm.amount);
     if (!(amount > 0)) { setCm({ ...cm, err: L('invalidAmount') }); return; }
-    if (!cm.reason.trim()) { setCm({ ...cm, err: L('reasonRequired') }); return; }
+    if (cm.reason.trim().length < 3) { setCm({ ...cm, err: L('reasonRequired') }); hint('REASON'); return; }
     try {
       const args = { shift: shift.name, direction: cm.direction, amount, reason: cm.reason.trim() };
       if (cm.needPin) { args.manager = cm.manager; args.pin = cm.pin; }
@@ -187,7 +187,7 @@ export default function App() {
       setCm({ ...cm, needPin: cm.needPin || needs, err: e.message });
     }
   }
-  async function closeShift() { try { const r = await api('shift.close_shift', { shift: shift.name, counted_cash: counted }); if (r.pending) { setZ(null); setMsg(L('closePending')); } else setZ(r); setShift(null); } catch (e) { setMsg(e.message); } }
+  async function closeShift() { if (String(counted).trim() === '' || !(Number(counted) >= 0)) { hint('COUNTED'); return; } try { const r = await api('shift.close_shift', { shift: shift.name, counted_cash: counted }); if (r.pending) { setZ(null); setMsg(L('closePending')); } else setZ(r); setShift(null); } catch (e) { setMsg(e.message); } }
 
   return (
     <div className="app">
@@ -219,12 +219,12 @@ export default function App() {
           {z && <pre data-testid="z">{L('expected')}: {fmt(z.expected_cash)} / {L('countedCash')}: {fmt(z.counted_cash)} / {L('difference')}: {fmt(z.difference)}</pre>}
           {msg && <div className="msg" data-testid="close-pending-msg">{msg}</div>}
           {perms.approve === 'Y' && perms.seeExpected === 'Y' && <Approvals L={L} fmt={fmt} />}
-          {(perms.editInvoice === 'Y' || perms.voidInvoice === 'Y') && <EditInvoice L={L} fmt={fmt} perms={perms} onReceipt={setRc} />}
+          {(perms.editInvoice === 'Y' || perms.voidInvoice === 'Y') && <EditInvoice L={L} fmt={fmt} perms={perms} onReceipt={setRc} hint={hint} />}
         </section>
       ) : view === 'edit' ? (
-        <EditInvoice L={L} fmt={fmt} perms={perms} onReceipt={setRc} />
+        <EditInvoice L={L} fmt={fmt} perms={perms} onReceipt={setRc} hint={hint} />
       ) : view === 'gifts' ? (
-        <Gifts L={L} fmt={fmt} perms={perms} shift={shift} />
+        <Gifts L={L} fmt={fmt} perms={perms} shift={shift} hint={hint} />
       ) : view === 'coupons' ? (
         <Coupons L={L} fmt={fmt} />
       ) : view === 'approvals' ? (

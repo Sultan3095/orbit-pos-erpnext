@@ -9,6 +9,8 @@ export const ISSUES = {
   NO_SHIFT: { sel: ['[data-testid=open]'], short: L('مفيش شيفت مفتوح.', 'There is no open shift.'), long: L('اكتب الكاش اللي في الدرج واضغط فتح شفت عشان تقدر تبيع.', 'Enter the cash in the drawer and press Open shift so you can sell.') },
   GIFT: { sel: ['[data-testid=gift-no]'], short: L('في مشكلة في كارت الهدية.', 'There is a problem with the gift card.'), long: L('راجع رقم الكارت. الكارت لازم يكون مباع، مش منتهي ولا ملغي ولا فاضي. تقدر تستعلم عن حالته من تبويب كروت الهدايا.', 'Check the card number. The card must be sold, not expired, void or empty. You can look up its state on the Gift cards tab.') },
   COUPON: { sel: ['[data-testid=coupon-code]'], short: L('الكوبون مش مقبول.', 'The coupon was not accepted.'), long: L('الكوبون ممكن يكون منتهي أو مقفول أو الفاتورة أقل من الحد الأدنى، أو محتاج عميل محدد. راجع الكوبون من تبويب الكوبونات.', 'The coupon may be expired, switched off, the invoice may be under its minimum, or it needs a named customer. Review it on the Coupons tab.') },
+  REASON: { sel: ['[data-testid=cm-reason]', '[data-testid=ed-reason]', '[data-testid=ed-reason-reopen]', '[data-testid=gw-reason]'], short: L('السبب ناقص.', 'The reason is missing.'), long: L('اكتب السبب (3 حروف على الأقل). بيتسجل في سجل المراجعة.', 'Write the reason (3+ characters). It is saved in the audit log.') },
+  COUNTED: { sel: ['[data-testid=counted]'], short: L('اكتب الكاش اللي عديته.', 'Enter the cash you counted.'), long: L('عدّ الكاش اللي في الدرج واكتب المبلغ هنا قبل ما تقفل الشيفت. القفل أعمى: مش هتشوف المتوقع.', 'Count the cash in the drawer and type the amount here before closing the shift. The close is blind: you will not see the expected amount.') },
 };
 let cur = null;
   function mascotSVG() {

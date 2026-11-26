@@ -48,6 +48,7 @@ try {
   await p.click('[data-testid=cash-out]'); await p.waitForSelector('[data-testid=cm-dialog]');
   await p.type('[data-testid=cm-amount]', '50'); await p.click('[data-testid=cm-save]');
   assert.ok((await txt('[data-testid=cm-err]')).includes('required'), 'reason required');
+  await p.waitForSelector('#guide[data-guide=REASON]'); await p.screenshot({ path: OUT + '/guide-4-reason-en.png' }); await p.click('#guide [data-g=x]'); await sleep(200);
   await p.type('[data-testid=cm-reason]', 'bags from the supermarket'); await p.screenshot({ path: OUT + '/5-cashout-dialog.png' });
   await p.click('[data-testid=cm-save]'); await new Promise((r) => setTimeout(r, 400));
   assert.equal(await p.$('[data-testid=cm-dialog]'), null); assert.ok((await txt('[data-testid=msg]')).includes('50.00'));
@@ -56,6 +57,7 @@ try {
   await p.click('[data-testid=cash-in]'); // reopen as cash in resets the dialog
   await p.type('[data-testid=cm-amount]', '5'); await p.type('[data-testid=cm-reason]', 'float'); await p.click('[data-testid=cm-save]'); await new Promise((r) => setTimeout(r, 400));
   assert.equal(await p.$('[data-testid=cm-dialog]'), null);
+  await p.click('[data-testid=close]'); await p.waitForSelector('#guide[data-guide=COUNTED]'); await p.screenshot({ path: OUT + '/guide-5-counted-en.png' }); await p.click('#guide [data-g=x]'); await sleep(200);
   await p.type('[data-testid=counted]', '0'); await p.click('[data-testid=close]'); await p.waitForSelector('[data-testid=z]');
   console.log('UI e2e (mock API) PASSED');
 } finally { await b.close(); srv.kill(); }

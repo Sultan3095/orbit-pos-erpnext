@@ -16,7 +16,7 @@ export function GiftShiftBlock({ L, fmt, shift }) {
 }
 
 // Gift cards: list, sell, check balance, history, extend, cancel (unused only). The server holds every rule.
-export default function Gifts({ L, fmt, perms, shift }) {
+export default function Gifts({ L, fmt, perms, shift, hint = () => {} }) {
   const [data, setData] = useState({ cards: [], liability: { open: 0, expired: 0, count: 0 } });
   const [q, setQ] = useState(''); const [msg, setMsg] = useState(''); const [form, setForm] = useState(null);
   const [hist, setHist] = useState(null); const [sold, setSold] = useState(null); const [chk, setChk] = useState('');
@@ -36,7 +36,7 @@ export default function Gifts({ L, fmt, perms, shift }) {
   async function history(no) { try { setHist(await api('gifts.gift_card_history', { card_no: no })); } catch (e) { setMsg(e.message); } }
   async function cancel(no) { if (!window.confirm(L('giftVoidQ'))) return; try { await api('gifts.void_gift_card', { card_no: no, reason: 'cancelled' }); load(); } catch (e) { setMsg(e.message); } }
   async function extend(no) { const d = window.prompt(L('giftExpires') + ' (YYYY-MM-DD)'); if (d === null) return; try { await api('gifts.extend_gift_card', { card_no: no, new_date: d }); load(); } catch (e) { setMsg(e.message); } }
-  async function writeOff() { setMsg(''); try { await api('gifts.write_off_gift_card', { card_no: wo.no, reason: wo.reason }); setWo(null); load(); } catch (e) { setMsg(e.message); } }
+  async function writeOff() { setMsg(''); if ((wo.reason || '').trim().length < 3) { hint('REASON'); return; } try { await api('gifts.write_off_gift_card', { card_no: wo.no, reason: wo.reason }); setWo(null); load(); } catch (e) { setMsg(e.message); } }
   async function makeCards() { setMsg(''); try { const r = await api('gifts.print_gift_cards', { value: pf.value, qty: pf.qty }); setSheet(r.cards); setDsn(r.design); setPf(null); } catch (e) { setMsg(e.message); } }
   const cur = ''; const [dsn, setDsn] = useState(null); const [po, setPo] = useState({ cropMarks: true, dataOnly: false });
   const T = byVal.total || {};
