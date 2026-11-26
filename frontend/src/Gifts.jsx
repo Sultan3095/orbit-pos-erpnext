@@ -1,3 +1,4 @@
+import { fail } from './guide.js';
 import { useEffect, useState } from 'react';
 import { api } from './api.js';
 import { sheetBody, SHEET_CSS, printSheet } from './giftCards.js';
@@ -16,13 +17,13 @@ export function GiftShiftBlock({ L, fmt, shift }) {
 }
 
 // Gift cards: list, sell, check balance, history, extend, cancel (unused only). The server holds every rule.
-export default function Gifts({ L, fmt, perms, shift }) {
+export default function Gifts({ L, fmt, perms, shift, hint = () => {} }) {
   const [data, setData] = useState({ cards: [], liability: { open: 0, expired: 0, count: 0 } });
   const [q, setQ] = useState(''); const [msg, setMsg] = useState(''); const [form, setForm] = useState(null);
   const [hist, setHist] = useState(null); const [sold, setSold] = useState(null); const [chk, setChk] = useState('');
   const [chkRes, setChkRes] = useState(null);
   const [byVal, setByVal] = useState({ rows: [], total: {} }); const [wo, setWo] = useState(null); const [pf, setPf] = useState(null); const [sheet, setSheet] = useState(null);
-  const load = async () => { try { setData(await api('gifts.list_gift_cards', { q })); setByVal(await api('gifts.gift_by_value', {})); } catch (e) { setMsg(e.message); } };
+  const load = async () => { try { setData(await api('gifts.list_gift_cards', { q })); setByVal(await api('gifts.gift_by_value', {})); } catch (e) { setMsg(fail(e)); } };
   useEffect(() => { load(); }, [q]);
   const mgr = perms.voidGiftCard === 'Y';
   async function sell() {
@@ -30,14 +31,14 @@ export default function Gifts({ L, fmt, perms, shift }) {
     try {
       const r = await api('gifts.sell_gift_card', { amount: form.amount, shift: shift.name, method: form.method, card_no: form.no || '', expires_days: form.days || 0, customer_name: form.customer || '', ref: form.ref || '' });
       setSold(r); setForm(null); load();
-    } catch (e) { setMsg(e.message); }
+    } catch (e) { setMsg(fail(e)); }
   }
-  async function check() { setMsg(''); setChkRes(null); try { setChkRes(await api('gifts.check_gift_card', { card_no: chk })); } catch (e) { setMsg(e.message); } }
-  async function history(no) { try { setHist(await api('gifts.gift_card_history', { card_no: no })); } catch (e) { setMsg(e.message); } }
-  async function cancel(no) { if (!window.confirm(L('giftVoidQ'))) return; try { await api('gifts.void_gift_card', { card_no: no, reason: 'cancelled' }); load(); } catch (e) { setMsg(e.message); } }
-  async function extend(no) { const d = window.prompt(L('giftExpires') + ' (YYYY-MM-DD)'); if (d === null) return; try { await api('gifts.extend_gift_card', { card_no: no, new_date: d }); load(); } catch (e) { setMsg(e.message); } }
-  async function writeOff() { setMsg(''); try { await api('gifts.write_off_gift_card', { card_no: wo.no, reason: wo.reason }); setWo(null); load(); } catch (e) { setMsg(e.message); } }
-  async function makeCards() { setMsg(''); try { const r = await api('gifts.print_gift_cards', { value: pf.value, qty: pf.qty }); setSheet(r.cards); setDsn(r.design); setPf(null); } catch (e) { setMsg(e.message); } }
+  async function check() { setMsg(''); setChkRes(null); try { setChkRes(await api('gifts.check_gift_card', { card_no: chk })); } catch (e) { setMsg(fail(e)); } }
+  async function history(no) { try { setHist(await api('gifts.gift_card_history', { card_no: no })); } catch (e) { setMsg(fail(e)); } }
+  async function cancel(no) { if (!window.confirm(L('giftVoidQ'))) return; try { await api('gifts.void_gift_card', { card_no: no, reason: 'cancelled' }); load(); } catch (e) { setMsg(fail(e)); } }
+  async function extend(no) { const d = window.prompt(L('giftExpires') + ' (YYYY-MM-DD)'); if (d === null) return; try { await api('gifts.extend_gift_card', { card_no: no, new_date: d }); load(); } catch (e) { setMsg(fail(e)); } }
+  async function writeOff() { setMsg(''); if ((wo.reason || '').trim().length < 3) { hint('REASON'); return; } try { await api('gifts.write_off_gift_card', { card_no: wo.no, reason: wo.reason }); setWo(null); load(); } catch (e) { setMsg(fail(e)); } }
+  async function makeCards() { setMsg(''); try { const r = await api('gifts.print_gift_cards', { value: pf.value, qty: pf.qty }); setSheet(r.cards); setDsn(r.design); setPf(null); } catch (e) { setMsg(fail(e)); } }
   const cur = ''; const [dsn, setDsn] = useState(null); const [po, setPo] = useState({ cropMarks: true, dataOnly: false });
   const T = byVal.total || {};
   const two = (n, v) => <td>{n || 0}{n ? <small className="muted"> ({fmt(v)})</small> : null}</td>;

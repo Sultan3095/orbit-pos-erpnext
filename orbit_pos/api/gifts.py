@@ -37,10 +37,11 @@ def _card(no, lock=False):
     k = _key(no)
     if not k or not frappe.db.exists("POS Gift Card", k):
         frappe.throw(frappe._("Gift card not found"), exc=frappe.DoesNotExistError)
-    if lock:
-        frappe.db.sql("select name from `tabPOS Gift Card` where name=%s for update", k)
     doc = frappe.get_doc("POS Gift Card", k)
-    doc.reload()
+    if lock:
+        # row lock plus a current read: a second terminal waits here and then sees the first one's balance
+        row = frappe.db.sql("select balance, status, expires_on from `tabPOS Gift Card` where name=%s for update", k, as_dict=True)[0]
+        doc.balance, doc.status, doc.expires_on = row.balance, row.status, row.expires_on
     return doc
 
 
@@ -86,37 +87,66 @@ def card_info(c):
             "expires_on": str(c.expires_on or ""), "customer_name": c.customer_name or ""}
 
 
+def _miss_state():
+    """(cache key, wrong lookups in the last 5 minutes). The window is kept in the value, not as a cache expiry."""
+    import time
+    key = "orbit_gift_miss:" + frappe.session.user
+    v = frappe.cache().get_value(key)
+    if isinstance(v, dict) and time.time() - flt(v.get("t")) < 300:
+        return key, int(v.get("n") or 0), flt(v.get("t"))
+    return key, 0, time.time()
+
+
+def _throttle():
+    """Card numbers are bearer money: at most 10 wrong lookups per user in 5 minutes."""
+    key, n, _ = _miss_state()
+    if n >= 10:
+        frappe.throw(frappe._("Too many wrong gift card numbers. Wait a few minutes and try again"), frappe.PermissionError)
+    return key
+
+
+def _lookup(card_no):
+    _throttle()
+    try:
+        return _card(card_no)
+    except frappe.DoesNotExistError:
+        key, n, t = _miss_state()
+        frappe.cache().set_value(key, {"n": n + 1, "t": t})
+        raise
+
+
 @frappe.whitelist()
 def check_gift_card(card_no):
     require_pos_user()
-    return card_info(_card(card_no))
+    return card_info(_lookup(card_no))
 
 
 @frappe.whitelist()
 def gift_card_history(card_no):
     require_pos_user()
-    c = _card(card_no)
+    c = _lookup(card_no)
     return {**card_info(c), "log": frappe.get_all("POS Gift Card Log", filters={"card": c.name}, order_by="creation asc",
                                                    fields=["creation", "kind", "amount", "balance", "ref"])}
 
 
 @frappe.whitelist()
 def list_gift_cards(q=""):
+    """Managers only: card numbers are bearer money. Cashiers look a card up by the number the customer gives."""
     require_pos_user()
-    rows = frappe.get_all("POS Gift Card", fields=["name"], order_by="creation desc", limit=500)
+    require("voidGiftCard")
+    fields = ["name", "initial", "balance", "status", "issued_on", "expires_on", "customer_name"]
     out = []
-    for r in rows:
-        i = card_info(frappe.get_doc("POS Gift Card", r.name))
+    for r in frappe.get_all("POS Gift Card", fields=fields, order_by="creation desc", limit=500):
+        i = card_info(r)
         if q and q.lower() not in (i["card_no"] + " " + i["customer_name"]).lower():
             continue
         out.append(i)
-    liab = {"open": 0.0, "expired": 0.0, "count": 0}
-    for i in out if not q else [card_info(frappe.get_doc("POS Gift Card", r.name)) for r in rows]:
-        if i["status"] == "active":
-            liab["open"] = r2(liab["open"] + i["balance"]); liab["count"] += 1
-        elif i["status"] == "expired":
-            liab["expired"] = r2(liab["expired"] + i["balance"])
-    return {"cards": out, "liability": liab}
+    # liability over ALL cards in two SQL sums, not the newest 500
+    today = nowdate()
+    cond = "status not in ('Void','Written Off') and balance > 0.004"
+    op = frappe.db.sql(f"select coalesce(sum(balance),0), count(*) from `tabPOS Gift Card` where {cond} and (expires_on is null or expires_on >= %s)", today)[0]
+    ex = frappe.db.sql(f"select coalesce(sum(balance),0) from `tabPOS Gift Card` where {cond} and expires_on < %s", today)[0]
+    return {"cards": out, "liability": {"open": r2(flt(op[0])), "expired": r2(flt(ex[0])), "count": int(op[1])}}
 
 
 @frappe.whitelist()
@@ -254,6 +284,7 @@ def write_off_gift_card(card_no, reason="", manager=None, pin=None):
 def gift_by_value():
     """One row per card value: sold, fully used, partly used, unused, open and expired balance, written off. Cancelled cards are left out."""
     require_pos_user()
+    require("voidGiftCard")
     today = getdate(nowdate())
     rows = {}
     for g in frappe.get_all("POS Gift Card", filters={"status": ["!=", "Void"]}, fields=["name", "initial", "balance", "status", "expires_on"], limit=100000):
@@ -296,11 +327,11 @@ def print_gift_cards(value, qty):
         frappe.throw(frappe._("Gift card value must be more than zero"))
     if not 1 <= qty <= 500:
         frappe.throw(frappe._("Quantity must be 1 to 500"))
-    import random
+    import secrets
     out = []
     for _ in range(qty):
         while True:
-            no = "GC" + str(random.randint(10000000, 99999999))
+            no = "GC" + str(10 ** 11 + secrets.randbelow(9 * 10 ** 11))    # 12 digits from the OS random source
             if not frappe.db.exists("POS Gift Card", no) and not frappe.db.exists("POS Printed Gift Card", no):
                 break
         frappe.get_doc({"doctype": "POS Printed Gift Card", "card_no": no, "value": value, "printed_on": nowdate()}).insert(ignore_permissions=True)
@@ -376,14 +407,17 @@ def to_engine(doc):
     return {"code": doc.name, "kind": doc.kind, "value": flt(doc.value), "minTotal": flt(doc.min_total)}
 
 
-def coupon_uses(code, customer=None):
+def coupon_uses(code, customer=None, lock=False):
+    if lock:   # current read, sees invoices another terminal has just committed
+        rows = frappe.db.sql("select customer from `tabSales Invoice` where orbit_coupon=%s and docstatus=1 and is_return=0 for update", code)
+        return len(rows), (sum(1 for r in rows if r[0] == customer) if customer else 0)
     base = {"orbit_coupon": code, "docstatus": 1, "is_return": 0}
     allc = frappe.db.count("Sales Invoice", base)
     mine = frappe.db.count("Sales Invoice", {**base, "customer": customer}) if customer else 0
     return allc, mine
 
 
-def check_coupon(code, customer=None, walkin=None):
+def check_coupon(code, customer=None, walkin=None, lock=False):
     """The coupon doc when it can be used now, else a readable error. `walkin` is the default POS customer
     (a per-customer limit needs a real customer)."""
     k = _key(code)
@@ -397,7 +431,9 @@ def check_coupon(code, customer=None, walkin=None):
         frappe.throw(frappe._("This coupon starts on {0}").format(c.start_date))
     if c.end_date and today > getdate(c.end_date):
         frappe.throw(frappe._("This coupon expired on {0}").format(c.end_date))
-    allc, mine = coupon_uses(c.name, customer)
+    if lock:   # a sale being saved: serialize on the coupon so max_uses cannot be passed by two terminals
+        frappe.db.sql("select name from `tabPOS Coupon` where name=%s for update", c.name)
+    allc, mine = coupon_uses(c.name, customer, lock=lock)
     if c.max_uses and allc >= c.max_uses:
         frappe.throw(frappe._("This coupon has been used up"))
     if c.max_per_customer:
@@ -411,6 +447,7 @@ def check_coupon(code, customer=None, walkin=None):
 @frappe.whitelist()
 def list_coupons():
     require_pos_user()
+    require("coupons")
     rows = frappe.get_all("POS Coupon", fields=["name as code", "kind", "value", "min_total", "start_date", "end_date",
                                                 "max_uses", "max_per_customer", "enabled"], order_by="creation desc")
     for r in rows:

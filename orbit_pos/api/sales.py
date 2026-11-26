@@ -1,6 +1,5 @@
 import hashlib
 import json
-import json
 import frappe
 from frappe.utils import flt, nowdate, getdate, now_datetime
 from orbit_pos.logic.promotions import apply_promotions, r2
@@ -8,7 +7,7 @@ from orbit_pos.logic.returns import return_allowed, refund_amount, cross_branch_
 from orbit_pos.logic.loyalty import points_earned, redeem_value
 from orbit_pos.logic.barcodes import make_ean13, parse_scale_barcode
 from . import gifts
-from .common import require_pos_user, verify_manager_pin, log_approval, settings, perm, can, approver_for
+from .common import require_pos_user, verify_manager_pin, log_approval, settings, perm, can, approver_for, require
 
 
 def active_promotions():
@@ -35,17 +34,67 @@ def lookup(code):
     return {**_item_info(item), "qty": 1}
 
 
+def server_price(item, price_list):
+    """The selling price the server trusts: the POS Profile's price list, valid today, newest first. None when the
+    item has no price on that list."""
+    if not price_list:
+        return None
+    today = nowdate()
+    row = frappe.db.sql("""select price_list_rate from `tabItem Price`
+        where item_code=%s and price_list=%s and selling=1
+          and (valid_from is null or valid_from <= %s) and (valid_upto is null or valid_upto >= %s)
+        order by coalesce(valid_from, '1900-01-01') desc, creation desc limit 1""", (item, price_list, today, today))
+    return flt(row[0][0]) if row else None
+
+
+def _user_price_list():
+    """Price list of the profile of the user's open shift (the screen has no profile picker)."""
+    prof = frappe.db.get_value("POS Shift", {"user": frappe.session.user, "status": "Open"}, "pos_profile")
+    return frappe.db.get_value("POS Profile", prof, "selling_price_list") if prof else None
+
+
 def _item_info(item):
     d = frappe.db.get_value("Item", item, ["name", "item_name", "item_group", "has_serial_no", "has_batch_no",
                                            "orbit_weighed"], as_dict=True)
-    d["price"] = flt(frappe.db.get_value("Item Price", {"item_code": item, "selling": 1}, "price_list_rate"))
+    pl = _user_price_list()
+    price = server_price(item, pl)
+    if price is None and not pl:   # no open shift yet: newest valid selling price on any list
+        price = flt(frappe.db.get_value("Item Price", {"item_code": item, "selling": 1}, "price_list_rate", order_by="creation desc"))
+    d["price"] = flt(price)
     return d
+
+
+def _check_prices(p, prof, shift):
+    """The price comes from the server's price list. A different price needs the priceOverride permission or a
+    manager PIN (the same rule as discounts). Revisions made by a manager keep the original price."""
+    if frappe.flags.get("orbit_revision"):
+        return None
+    diffs = []
+    for l in p["lines"]:
+        sent = flt(l.get("price"))
+        if sent < 0:
+            frappe.throw(frappe._("Price cannot be negative"))
+        real = server_price(l["itemId"], prof.selling_price_list)
+        if real is None or abs(real - sent) > 0.005:
+            diffs.append((l["itemId"], real, sent))
+    if not diffs:
+        return None
+    mode = perm("priceOverride")
+    if mode == "Y":
+        return None
+    if mode == "N":
+        i, real, sent = diffs[0]
+        frappe.throw(frappe._("The price of {0} is {1}, not {2}. Your role may not change prices").format(i, real if real is not None else "-", sent), frappe.PermissionError)
+    mgr = verify_manager_pin(p.get("manager"), p.get("manager_pin"))
+    log_approval(mgr, "Price Override", p.get("txn_id"), "; ".join(f"{i}: {r} -> {s_}" for i, r, s_ in diffs), shift)
+    return mgr
 
 
 @frappe.whitelist()
 def next_barcode(item_code=None):
     """Atomic sequence on the settings doc. If item_code is given, the barcode is attached to the item."""
     require_pos_user()
+    require("editItems")
     frappe.db.sql("select value from `tabSingles` where doctype='Orbit POS Settings' and field='barcode_seq' for update")
     s = frappe.get_doc("Orbit POS Settings")
     s.barcode_seq = (s.barcode_seq or 0) + 1
@@ -96,11 +145,15 @@ def _check_discount_authority(p, shift):
     if perm("discountAbove") == "Y":
         return None
     limit = flt(settings().cashier_max_discount_percent)
-    worst = 0
+    # amount discounts count too: each one is turned into a percent of what it is taken from
+    worst, gross_all = 0, 0
     for l in p["lines"]:
-        worst = max(worst, flt(l.get("manualPct")))
-    if flt(p.get("inv_pct")) > worst:
-        worst = flt(p.get("inv_pct"))
+        gross = flt(l.get("qty")) * flt(l.get("price"))
+        gross_all += gross
+        pct = flt(l.get("manualPct")) + (flt(l.get("manualAmt")) / gross * 100 if gross > 0 else (100 if flt(l.get("manualAmt")) > 0 else 0))
+        worst = max(worst, pct)
+    inv = flt(p.get("inv_pct")) + (flt(p.get("inv_amt")) / gross_all * 100 if gross_all > 0 else (100 if flt(p.get("inv_amt")) > 0 else 0))
+    worst = round(max(worst, inv), 4)
     if worst > limit:
         if perm("discountAbove") == "N":
             frappe.throw(frappe._("Your role may not give this discount"), frappe.PermissionError)
@@ -148,16 +201,22 @@ def _submit_sale(payload):
     if sh.user != frappe.session.user and not sh.shared_shift and not frappe.flags.get("orbit_revision"):
         frappe.throw(frappe._("This shift belongs to another user"), frappe.PermissionError)
     _check_discount_authority(p, shift)
+    prof = frappe.get_doc("POS Profile", sh.pos_profile)
+    _check_prices(p, prof, shift)
 
-    customer = p.get("customer") or frappe.db.get_value("POS Profile", sh.pos_profile, "customer")
+    walkin = prof.customer
+    customer = p.get("customer") or walkin
+    named = bool(customer) and customer != walkin    # points belong to a named customer, never to the shared walk-in
     pts = 0
     if p.get("redeem_points"):
-        pts = min(int(p["redeem_points"]), _balance(customer))
-    cdoc = gifts.check_coupon(p["coupon"], customer, frappe.db.get_value("POS Profile", sh.pos_profile, "customer")) if p.get("coupon") else None
+        if not named:
+            frappe.throw(frappe._("Choose a named customer to use loyalty points"))
+        frappe.db.sql("select name from `tabCustomer` where name=%s for update", customer)
+        pts = min(int(p["redeem_points"]), _balance(customer, lock=True))
+    cdoc = gifts.check_coupon(p["coupon"], customer, walkin, lock=True) if p.get("coupon") else None
     calc = _compute(p["lines"], pts, p.get("inv_pct", 0), p.get("inv_amt", 0), gifts.to_engine(cdoc) if cdoc else None)
     if cdoc and not calc["coupon_disc"] > 0:
         frappe.throw(frappe._("The coupon needs a subtotal of at least {0}").format(cdoc.min_total))
-    prof = frappe.get_doc("POS Profile", sh.pos_profile)
 
     si = frappe.new_doc("Sales Invoice")
     si.update({"customer": customer, "is_pos": 1, "update_stock": 1, "pos_profile": sh.pos_profile,
@@ -215,9 +274,16 @@ def _submit_sale(payload):
             paid += gift_used
             si.orbit_gift_card = gc.name
             si.orbit_gift_amount = gift_used
+    allowed = {r.mode_of_payment for r in prof.payments}
     for pay in p.get("payments", []):
         if pay["method"] in (gifts.GIFT_MODE, CREDIT_MODE):
             frappe.throw(frappe._("Use the gift card field or the exchange receipt field for this"))
+        if flt(pay.get("amount")) < 0:
+            frappe.throw(frappe._("A payment amount cannot be negative"))
+        if not flt(pay.get("amount")) > 0:
+            continue    # an empty row (for example 0 cash when a gift card or exchange receipt covers it)
+        if pay["method"] not in allowed:
+            frappe.throw(frappe._("Payment method {0} is not on this POS Profile").format(pay["method"]))
         si.append("payments", {"mode_of_payment": pay["method"], "amount": flt(pay["amount"]),
                                "orbit_ref": (pay.get("ref") or "")[:60]})
         paid += flt(pay["amount"])
@@ -245,7 +311,7 @@ def _submit_sale(payload):
         rec.db_set({"status": "Redeemed", "redeemed_in": si.name})
         if credit_left > 0.004:
             new_receipt = _issue_receipt(customer, credit_left, None, shift, rec.expires_on, source=rec.name).name
-    if customer:
+    if named:
         earned = points_earned(si.grand_total, flt(settings().currency_per_point))
         if earned:
             _ledger(customer, earned, si.name, "earn")
@@ -259,14 +325,13 @@ def _submit_sale(payload):
             "gift_balance": flt(frappe.db.get_value("POS Gift Card", si.orbit_gift_card, "balance")) if gift_used > 0 else None}
 
 
-def _balance(customer):
+def _balance(customer, lock=False):
+    """Points balance. lock=True is a current read (the caller already holds the customer row lock), so a second
+    terminal cannot spend the same points."""
     if not customer:
         return 0
-    return int(frappe.db.sql("select coalesce(sum(points),0) from `tabLoyalty Ledger Entry` where customer=%s", customer)[0][0])
-
-
-def _balance(customer):
-    return int(frappe.db.sql("select coalesce(sum(points),0) from `tabLoyalty Ledger Entry` where customer=%s", customer)[0][0])
+    return int(frappe.db.sql("select coalesce(sum(points),0) from `tabLoyalty Ledger Entry` where customer=%s" +
+                             (" for update" if lock else ""), customer)[0][0])
 
 
 def _take_back(customer, pts, inv, note):
@@ -317,8 +382,11 @@ def _issue_receipt(customer, amount, return_invoice, shift, expires_on=None, sou
 def _open_receipt(name):
     if not frappe.db.exists("POS Exchange Receipt", name):
         frappe.throw(frappe._("Exchange receipt {0} not found").format(name))
+    # current read under a row lock: two terminals cannot redeem the same receipt
+    frappe.db.sql("select name from `tabPOS Exchange Receipt` where name=%s for update", name)
     rec = frappe.get_doc("POS Exchange Receipt", name)
-    rec.reload()
+    live = frappe.db.sql("select status from `tabPOS Exchange Receipt` where name=%s for update", name)
+    rec.status = live[0][0] if live else rec.status
     if rec.status != "Open":
         frappe.throw(frappe._("Exchange receipt {0} is already {1}").format(name, rec.status))
     if credit_expired(rec.expires_on, getdate(nowdate())):
@@ -356,9 +424,14 @@ def create_return(invoice, items, manager=None, pin=None, current_branch=None, m
     s = settings()
     if mode not in ("refund", "credit"):
         frappe.throw(frappe._("Unknown return mode"))
+    frappe.db.sql("select name from `tabSales Invoice` where name=%s for update", invoice)   # one return at a time per invoice
     orig = frappe.get_doc("Sales Invoice", invoice)
     if orig.docstatus != 1 or orig.is_return:
         frappe.throw(frappe._("Cannot return this document"))
+    my_shift = frappe.db.get_value("POS Shift", {"user": frappe.session.user, "status": "Open"}, "name") or \
+        frappe.db.get_value("POS Shift", {"shared_shift": 1, "status": "Open"}, "name", order_by="creation desc")
+    if not my_shift and not frappe.flags.get("orbit_revision"):
+        frappe.throw(frappe._("Open a shift before a return: the refund must be counted in a drawer"))
     if not cross_branch_allowed(orig.orbit_branch or "", current_branch or "", bool(s.allow_cross_branch_returns)):
         frappe.throw(frappe._("Returns from other branches are disabled in settings"))
     ok, needs_mgr = return_allowed(orig.posting_date, getdate(nowdate()), int(s.return_window_days or 0), manager_approved=False)
@@ -423,7 +496,7 @@ def create_return(invoice, items, manager=None, pin=None, current_branch=None, m
     back_net = sum(qty_rate(r) for r, _ in chosen)
     ret.discount_amount = -flt(orig.discount_amount) * back_net / orig_net
     ret.orbit_branch = current_branch
-    ret.orbit_shift = frappe.db.get_value("POS Shift", {"user": frappe.session.user, "status": "Open"}, "name")
+    ret.orbit_shift = my_shift
     ret.update_stock = 1
     ret.calculate_taxes_and_totals()
     ret.set("payments", [])

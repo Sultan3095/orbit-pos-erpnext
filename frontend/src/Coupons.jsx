@@ -1,3 +1,4 @@
+import { fail } from './guide.js';
 import { useEffect, useState } from 'react';
 import { api } from './api.js';
 
@@ -5,10 +6,10 @@ import { api } from './api.js';
 const EMPTY = { code: '', kind: 'percent', value: '', min_total: '', start_date: '', end_date: '', max_uses: '', max_per_customer: '', enabled: 1 };
 export default function Coupons({ L, fmt }) {
   const [list, setList] = useState([]); const [f, setF] = useState(null); const [msg, setMsg] = useState('');
-  const load = async () => { try { setList(await api('gifts.list_coupons')); } catch (e) { setMsg(e.message); } };
+  const load = async () => { try { setList(await api('gifts.list_coupons')); } catch (e) { setMsg(fail(e)); } };
   useEffect(() => { load(); }, []);
-  async function save() { setMsg(''); try { await api('gifts.save_coupon', { data: JSON.stringify(f) }); setF(null); load(); } catch (e) { setMsg(e.message); } }
-  async function del(code) { if (!window.confirm(L('deleteQ'))) return; try { await api('gifts.delete_coupon', { code }); load(); } catch (e) { setMsg(e.message); } }
+  async function save() { setMsg(''); try { await api('gifts.save_coupon', { data: JSON.stringify(f) }); setF(null); load(); } catch (e) { setMsg(fail(e)); } }
+  async function del(code) { if (!window.confirm(L('deleteQ'))) return; try { await api('gifts.delete_coupon', { code }); load(); } catch (e) { setMsg(fail(e)); } }
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   return (
     <section className="card" data-testid="coupons">

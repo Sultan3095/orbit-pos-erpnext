@@ -714,3 +714,94 @@ class TestFlows(Base):
         shift.set_theme("dark")
         frappe.set_user("cashier@orbit.test")
         self.assertEqual(shift.my_permissions()["theme"], "galaxy")
+
+    # ---- review fixes (each one failed before the fix)
+    def test_41_price_comes_from_the_server(self):
+        from orbit_pos.api import sales
+        frappe.set_user("cashier@orbit.test"); sh = self._shift(100)
+        with self.assertRaises(frappe.PermissionError):                 # sells a 10 item for 1
+            sales.submit_sale(self._payload(sh, [{"itemId": "ORB-A", "qty": 1, "price": 1}], 1))
+        r = sales.submit_sale(self._payload(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 10))   # the real price is fine
+        self.assertEqual(r["grand_total"], 10.0)
+        frappe.set_user("Administrator")                                # System Manager may override
+        sh2 = self._shift(100)
+        r = sales.submit_sale(self._payload(sh2, [{"itemId": "ORB-A", "qty": 1, "price": 7}], 7))
+        self.assertEqual(r["grand_total"], 7.0)
+
+    def test_42_amount_discounts_count_against_the_cashier_limit(self):
+        from orbit_pos.api import sales
+        frappe.set_user("cashier@orbit.test"); sh = self._shift(100)
+        with self.assertRaises(frappe.PermissionError):                 # 9 off a 10 item = 90%
+            sales.submit_sale(self._payload(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10, "manualAmt": 9}], 1))
+        with self.assertRaises(frappe.PermissionError):                 # invoice amount discount
+            sales.submit_sale(self._payload(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 1, inv_amt=9))
+
+    def test_43_bad_payments_are_refused(self):
+        from orbit_pos.api import sales
+        sh = self._shift(100)
+        for pay in ([{"method": "Cash", "amount": -5}, {"method": "Cash", "amount": 15}], [{"method": "Cash", "amount": 0}],
+                    [{"method": "Bitcoin", "amount": 10}]):
+            with self.assertRaises(frappe.ValidationError):
+                sales.submit_sale(self._payload(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 0, payments=pay))
+
+    def test_44_walkin_customer_never_earns_or_redeems_points(self):
+        from orbit_pos.api import sales
+        sh = self._shift(100)
+        st = frappe.get_doc("Orbit POS Settings"); st.currency_per_point = 1; st.value_per_point = 1; st.save()
+        r = sales.submit_sale(self._payload(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 10))
+        self.assertEqual(frappe.db.count("Loyalty Ledger Entry", {"sales_invoice": r["sales_invoice"]}), 0)
+        with self.assertRaises(frappe.ValidationError):
+            sales.submit_sale(self._payload(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 10, redeem_points=5))
+
+    def test_45_z_report_and_cash_movement_are_guarded(self):
+        from orbit_pos.api import shift
+        frappe.set_user("boss@orbit.test"); sh = self._shift(100)
+        frappe.set_user("cashier@orbit.test")
+        with self.assertRaises(frappe.PermissionError):                 # not his shift
+            shift.z_report(sh)
+        with self.assertRaises(frappe.PermissionError):
+            shift.cash_movement(sh, "Out", 5, "taking the manager's cash")
+        frappe.set_user("boss@orbit.test")
+        self.assertEqual(shift.z_report(sh)["shift"], sh)
+
+    def test_46_return_needs_an_open_shift(self):
+        from orbit_pos.api import sales
+        frappe.set_user("boss@orbit.test"); sh = self._shift(100)
+        r = sales.submit_sale(self._payload(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 10))
+        frappe.db.set_value("POS Shift", sh, "status", "Closed")
+        with self.assertRaises(frappe.ValidationError):
+            sales.create_return(r["sales_invoice"], json.dumps([{"item_code": "ORB-A", "qty": 1}]))
+
+    def test_47_gift_lists_are_for_managers_and_numbers_are_long(self):
+        from orbit_pos.api import gifts
+        frappe.set_user("cashier@orbit.test")
+        for fn in (gifts.list_gift_cards, gifts.gift_by_value, gifts.list_coupons):
+            with self.assertRaises(frappe.PermissionError):
+                fn()
+        frappe.set_user("Administrator"); sh = self._shift(100)
+        no = gifts.print_gift_cards(50, 1)["cards"][0]["card_no"]
+        self.assertEqual(len(no), 14)                                   # GC + 12 digits
+        liab = gifts.list_gift_cards()["liability"]
+        self.assertGreaterEqual(liab["open"], 0)
+
+    def test_48_wrong_gift_numbers_are_throttled(self):
+        from orbit_pos.api import gifts
+        frappe.set_user("cashier@orbit.test"); frappe.cache().delete_value("orbit_gift_miss:cashier@orbit.test")
+        for i in range(10):
+            with self.assertRaises(frappe.DoesNotExistError):
+                gifts.check_gift_card("GC0000000%d" % i)
+        with self.assertRaises(frappe.PermissionError):
+            gifts.check_gift_card("GC00000099")
+        frappe.cache().delete_value("orbit_gift_miss:cashier@orbit.test")
+
+    def test_49_next_barcode_needs_edit_items_and_one_open_shift(self):
+        from orbit_pos.api import sales, shift
+        frappe.set_user("cashier@orbit.test")
+        with self.assertRaises(frappe.PermissionError):
+            sales.next_barcode()
+        self._shift(100)
+        with self.assertRaises(frappe.ValidationError):
+            shift.open_shift(self.profile, 50)
+        with self.assertRaises(frappe.PermissionError):
+            frappe.db.set_value("POS Shift", {"user": "cashier@orbit.test"}, "status", "Closed")
+            shift.open_shift(self.profile, 50, shared=1)
