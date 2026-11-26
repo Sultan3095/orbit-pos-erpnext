@@ -14,7 +14,7 @@ form { display:flex; gap:8px; } form input { flex:1; } table { width:100%; borde
 .promo { color:var(--accent); } .msg { margin-top:8px; color:var(--accent); } a { color:var(--accent); }
 .display { min-height:100vh; padding:40px; background:var(--bg); color:var(--fg); } .display .big { font-size:56px; margin-top:24px; } .display td { font-size:28px; }
 @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
-.tabs button { margin-inline-end: 6px; } .tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.tabs { display:flex; flex-wrap:wrap; gap:6px; } .tabs button { margin-inline-end: 0; } header { flex-wrap:wrap; row-gap:6px; } .tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
 .promos { margin-bottom: 12px; } .promos span { display:inline-block; margin:2px 6px 2px 0; padding:3px 10px; border-radius:999px; background:var(--accent); color:#fff; font-size:13px; }
 .ok-box { border-color: var(--ok); margin-top: 12px; } .picker { position:relative; } .picker .drop { position:absolute; z-index:5; background:var(--card); border:1px solid var(--line); border-radius:8px; width:100%; max-height:220px; overflow:auto; }
 .picker .drop div { padding:6px 10px; cursor:pointer; } .picker .drop div:hover { background:var(--bg); }

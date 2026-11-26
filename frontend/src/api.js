@@ -7,6 +7,14 @@ let csrf = () => {
   return (document.cookie.match(/csrf_token=([^;]+)/) || [])[1] || '';
 };
 
+// Turns a raw server error into one short readable line: no HTML, no Python class path, no stack.
+export function readable(m, status) {
+  let x = String(m || '').replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
+  x = x.split('\n').filter(Boolean).pop() || x;
+  x = x.replace(/^(?:[A-Za-z_]+\.)*[A-Za-z_]*(?:Error|Exception):\s*/, '');
+  if (!x || x.length > 240) x = status === 403 ? 'You do not have permission for this action.' : status === 404 ? 'Not found.' : status >= 500 ? 'Server error. Try again; if it repeats call support.' : 'Something went wrong.';
+  return x;
+}
 async function real(method, args) {
   const res = await fetch('/api/method/' + M + method, {
     method: 'POST', credentials: 'include',
@@ -16,6 +24,7 @@ async function real(method, args) {
   if (!res.ok) {
     let msg = res.statusText;
     try { const j = await res.json(); msg = (j._server_messages && JSON.parse(JSON.parse(j._server_messages)[0]).message) || j.exception || msg; } catch (e) {}
+    msg = readable(msg, res.status);
     const err = new Error(msg); err.permanent = res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429; throw err;
   }
   return (await res.json()).message;

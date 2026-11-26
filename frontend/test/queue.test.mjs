@@ -17,3 +17,10 @@ const st = mem(); const q3 = createQueue(st); q3.push({ txn_id: 'bad' }); q3.pus
 await q3.flush(async (p) => { if (p.txn_id === 'bad') throw Object.assign(new Error('x'), { permanent: true }); return { status: 'created' }; });
 assert.equal(q3.list().length, 0); assert.equal(JSON.parse(st.getItem('orbit_queue_failed')).length, 1);
 console.log('queue tests passed');
+
+// readable server errors
+const { readable } = await import('../src/api.js');
+assert.equal(readable('<div>Coupon <b>expired</b></div>'), 'Coupon expired');
+assert.equal(readable('Traceback...\nfrappe.exceptions.ValidationError: Gift card is empty'), 'Gift card is empty');
+assert.ok(readable('x'.repeat(500), 500).startsWith('Server error'));
+console.log('readable errors ok');
