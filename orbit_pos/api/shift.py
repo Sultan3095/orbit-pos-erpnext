@@ -179,11 +179,12 @@ def z_report(shift):
         where orbit_shift=%s and docstatus=1 and is_return=0""", shift)[0]
     rets = frappe.db.sql("""select count(*), coalesce(sum(grand_total),0) from `tabSales Invoice`
         where orbit_shift=%s and docstatus=1 and is_return=1""", shift)[0]
-    from .gifts import gift_sold
+    from .gifts import gift_sold, shift_gifts
     gifts_sold = gift_sold(shift)
+    sg = shift_gifts(shift)
     return {"shift": shift, "user": doc.user, "opened_at": str(doc.opened_at), "closed_at": str(doc.closed_at or ""),
             "sales_count": sales[0], "sales_total": flt(sales[1]), "returns_count": rets[0],
-            "returns_total": flt(rets[1]), "gift_sold_count": gifts_sold[0], "gift_sold_total": gifts_sold[1], "opening_cash": doc.opening_cash,
+            "returns_total": flt(rets[1]), "gift_sold_count": gifts_sold[0], "gift_sold_total": gifts_sold[1], "gift_by_value": sg["by_value"], "gift_sold_cash": sg["sold_cash"], "gift_redeemed": sg["redeemed"], "opening_cash": doc.opening_cash,
             "expected_cash": None if pending else doc.expected_cash, "counted_cash": doc.counted_cash,
             "difference": None if pending else doc.difference, "approval_status": doc.approval_status}
 

@@ -204,10 +204,32 @@ with sync_playwright() as p:
         fr.get_by_test_id("gh-" + gno).click(); fr.get_by_test_id("gift-history").wait_for(timeout=20000)
         assert "78.40" in fr.get_by_test_id("gift-history").inner_text(), fr.get_by_test_id("gift-history").inner_text()
         cap(page, "سجل الكارت: إصدار ثم استخدام. الرصيد 78.40"); shot(page, "web-gift-history")
-        fr.get_by_test_id("tab-sale").click(); time.sleep(1)
-        fr.get_by_test_id("counted").fill("100"); fr.get_by_test_id("close").click(); time.sleep(2)
+        # per-value report, an expired card written off, printable cards, and the close block
+        fr.get_by_test_id("tab-gifts").click(); time.sleep(1.5)
+        nos = []
+        for amt in ("500", "500", "1000"):
+            fr.get_by_test_id("gift-sell-open").click(); fr.get_by_test_id("gf-amount").fill(amt); fr.get_by_test_id("gf-save").click()
+            fr.get_by_test_id("gift-sold").wait_for(timeout=20000); nos.append(fr.get_by_test_id("gift-sold-no").inner_text().strip()); time.sleep(0.5)
+        page.once("dialog", lambda d: d.accept("2020-01-01"))
+        fr.get_by_test_id("ge-" + nos[2]).click(); time.sleep(2)
+        assert fr.get_by_test_id("gift-denom-row").count() >= 3, "per-value rows missing"
+        cap(page, "تقرير الكروت حسب الفئة: اتباع، مستخدم، مفتوح، منتهي"); shot(page, "web-gift-by-value")
+        fr.get_by_test_id("gw-" + nos[2]).click(); fr.get_by_test_id("gw-reason").fill("منتهي من أكتر من سنة")
+        cap(page, "إعدام رصيد كارت منتهي بسبب مكتوب (للمدير فقط)"); shot(page, "web-gift-writeoff-form", None, 500)
+        fr.get_by_test_id("gw-save").click(); time.sleep(2)
+        assert "1000" in fr.get_by_test_id("gift-denom").inner_text().replace(",", ""), "1000 row missing after write-off"
+        cap(page, "الكارت المنتهي اتعدم والالتزام اتقفل"); shot(page, "web-gift-written-off")
+        fr.get_by_test_id("gift-print-open").click(); fr.get_by_test_id("gp-value").fill("500"); fr.get_by_test_id("gp-qty").fill("8")
+        cap(page, "طباعة كروت: القيمة والعدد"); shot(page, "web-gift-print-form", None, 500)
+        fr.get_by_test_id("gp-go").click(); fr.get_by_test_id("gift-sheet").wait_for(timeout=20000); time.sleep(1)
+        assert fr.locator(".gqr svg rect").count() > 100 and fr.locator(".gbar svg").count() == 8, "QR / barcode not generated"
+        cap(page, "الكروت جاهزة: QR وباركود بيتولدوا من رقم الكارت"); shot(page, "web-gift-cards-sheet")
+        fr.get_by_test_id("tab-sale").click(); time.sleep(1.5)
+        assert fr.get_by_test_id("gift-close").is_visible(), "close block missing"
+        cap(page, "قبل قفل الشيفت: الكروت المباعة بالفئة والكاش اللي في الدرج"); shot(page, "web-gift-close-block")
+        fr.get_by_test_id("counted").fill("2100"); fr.get_by_test_id("close").click(); time.sleep(2)
         zt = fr.get_by_test_id("z").inner_text()
-        assert "100.00" in zt, "Z report with a cash gift card sale does not balance: " + zt
+        assert "2,100.00" in zt or "2100.00" in zt, "Z report with cash gift card sales does not balance: " + zt
         cap(page, "قفل الشيفت: نقدية بيع الكارت داخلة في الدرج"); shot(page, "web-gift-z")
     except Exception as e:
         log.append(("gift-flow", "FAIL " + str(e)[:300]))

@@ -54,6 +54,8 @@ def check_card(no, lock=False):
     c = _card(no, lock)
     if c.status == "Void":
         frappe.throw(frappe._("This gift card was cancelled"))
+    if c.status == "Written Off":
+        frappe.throw(frappe._("This gift card balance was written off"))
     if c.expires_on and getdate(nowdate()) > getdate(c.expires_on):
         frappe.throw(frappe._("This gift card expired on {0}").format(c.expires_on))
     if not flt(c.balance) > 0.004:
@@ -79,7 +81,7 @@ def give_back(no, amount, kind, ref):
 
 def card_info(c):
     expired = bool(c.expires_on and getdate(nowdate()) > getdate(c.expires_on))
-    state = "void" if c.status == "Void" else "expired" if expired else "used" if not flt(c.balance) > 0 else "active"
+    state = "void" if c.status == "Void" else "writtenoff" if c.status == "Written Off" else "expired" if expired else "used" if not flt(c.balance) > 0 else "active"
     return {"card_no": c.name, "initial": flt(c.initial), "balance": flt(c.balance), "status": state, "issued_on": str(c.issued_on or ""),
             "expires_on": str(c.expires_on or ""), "customer_name": c.customer_name or ""}
 
@@ -148,6 +150,9 @@ def sell_gift_card(amount, shift, method="Cash", card_no=None, expires_days=0, c
             no = "GC" + str(random.randint(10000000, 99999999))
             if not frappe.db.exists("POS Gift Card", no):
                 break
+    pr = frappe.db.get_value("POS Printed Gift Card", no, ["name", "value"], as_dict=True) if no else None
+    if pr and r2(flt(pr.value)) != amount:
+        frappe.throw(frappe._("This printed card has a different value than the amount entered"))
     days = int(expires_days or 0)
     expires = add_days(nowdate(), days) if days > 0 else None
     mop = frappe.get_doc("Mode of Payment", method)
@@ -168,6 +173,8 @@ def sell_gift_card(amount, shift, method="Cash", card_no=None, expires_days=0, c
                         "shift": shift, "issued_by": frappe.session.user, "journal_entry": je.name})
     c.insert(ignore_permissions=True)
     _log(c, "issue", amount, ref or je.name)
+    if pr:
+        frappe.db.set_value("POS Printed Gift Card", pr.name, "sold_on", nowdate())
     return {**card_info(c), "journal_entry": je.name}
 
 
@@ -191,6 +198,131 @@ def void_gift_card(card_no, reason="", manager=None, pin=None):
     _log(c, "void", amount, reason or "")
     log_approval(who, "Void Gift Card", c.name, reason or "", c.shift)
     return card_info(c)
+
+
+BREAKAGE = "Gift Card Breakage Income"
+
+
+def ensure_breakage_account(company):
+    acc = frappe.db.get_value("Account", {"company": company, "account_name": BREAKAGE, "is_group": 0}, "name")
+    if acc:
+        return acc
+    parent = frappe.db.get_value("Account", {"company": company, "account_name": "Indirect Income", "is_group": 1}, "name") or \
+        frappe.db.get_value("Account", {"company": company, "root_type": "Income", "is_group": 1}, "name")
+    return frappe.get_doc({"doctype": "Account", "account_name": BREAKAGE, "company": company, "parent_account": parent,
+                           "is_group": 0, "root_type": "Income"}).insert(ignore_permissions=True).name
+
+
+@frappe.whitelist()
+def write_off_gift_card(card_no, reason="", manager=None, pin=None):
+    """An expired card keeps its balance as a liability until a manager writes it off with a reason (Dr Gift Card Liability, Cr Breakage Income)."""
+    require_pos_user()
+    who = approver_for("voidGiftCard", manager, pin)
+    if len(str(reason or "").strip()) < 3:
+        frappe.throw(frappe._("Write the reason (3+ characters)"))
+    c = _card(card_no, lock=True)
+    if c.status == "Void":
+        frappe.throw(frappe._("This gift card was cancelled"))
+    if c.status == "Written Off":
+        frappe.throw(frappe._("This gift card balance was written off"))
+    if not (c.expires_on and getdate(nowdate()) > getdate(c.expires_on)):
+        frappe.throw(frappe._("Only an expired card can be written off"))
+    amount = r2(flt(c.balance))
+    if not amount > 0.004:
+        frappe.throw(frappe._("This gift card has no balance"))
+    prof = frappe.db.get_value("POS Shift", c.shift, "pos_profile") if c.shift else None
+    co = frappe.db.get_value("POS Profile", prof, "company") if prof else frappe.db.get_value("Account", {"account_name": LIABILITY, "is_group": 0}, "company")
+    ensure_gift_mode(co)
+    liab = frappe.db.get_value("Account", {"company": co, "account_name": LIABILITY, "is_group": 0}, "name")
+    inc = ensure_breakage_account(co)
+    cc = frappe.db.get_value("Company", co, "cost_center")
+    je = frappe.get_doc({"doctype": "Journal Entry", "voucher_type": "Journal Entry", "company": co, "posting_date": nowdate(),
+                         "user_remark": f"Gift card {c.name} expired balance written off: {reason}",
+                         "accounts": [{"account": liab, "debit_in_account_currency": amount, "cost_center": cc},
+                                      {"account": inc, "credit_in_account_currency": amount, "cost_center": cc}]})
+    je.insert(ignore_permissions=True)
+    je.submit()
+    c.balance = 0
+    c.status = "Written Off"
+    c.save(ignore_permissions=True)
+    _log(c, "writeoff", amount, str(reason).strip() + " | " + je.name)
+    log_approval(who, "Write Off Gift Card", c.name, str(reason).strip(), c.shift)
+    return {**card_info(c), "journal_entry": je.name, "written_off": amount}
+
+
+@frappe.whitelist()
+def gift_by_value():
+    """One row per card value: sold, fully used, partly used, unused, open and expired balance, written off. Cancelled cards are left out."""
+    require_pos_user()
+    today = getdate(nowdate())
+    rows = {}
+    for g in frappe.get_all("POS Gift Card", filters={"status": ["!=", "Void"]}, fields=["name", "initial", "balance", "status", "expires_on"], limit=100000):
+        k = r2(flt(g.initial))
+        r = rows.setdefault(k, {"value": k, "sold": 0, "sold_total": 0.0, "used": 0, "partly": 0, "untouched": 0, "open_count": 0, "open_balance": 0.0,
+                                "expired_count": 0, "expired_balance": 0.0, "written_off_count": 0, "written_off_total": 0.0})
+        r["sold"] += 1; r["sold_total"] = r2(r["sold_total"] + flt(g.initial))
+        if g.status == "Written Off":
+            wo = frappe.db.sql("select coalesce(sum(amount),0) from `tabPOS Gift Card Log` where card=%s and kind='writeoff'", g.name)[0][0]
+            r["written_off_count"] += 1; r["written_off_total"] = r2(r["written_off_total"] + flt(wo))
+            continue
+        bal = r2(flt(g.balance))
+        if not bal > 0.004:
+            r["used"] += 1
+            continue
+        if bal == r2(flt(g.initial)):
+            r["untouched"] += 1
+        else:
+            r["partly"] += 1
+        if g.expires_on and today > getdate(g.expires_on):
+            r["expired_count"] += 1; r["expired_balance"] = r2(r["expired_balance"] + bal)
+        else:
+            r["open_count"] += 1; r["open_balance"] = r2(r["open_balance"] + bal)
+    out = sorted(rows.values(), key=lambda x: x["value"])
+    total = {}
+    for r in out:
+        for k, v in r.items():
+            if k != "value":
+                total[k] = r2(total.get(k, 0) + v)
+    return {"rows": out, "total": total}
+
+
+@frappe.whitelist()
+def print_gift_cards(value, qty):
+    """A pool of card numbers to print. The value is printed on the card, so the sale checks it."""
+    require_pos_user()
+    require("sellGiftCard")
+    value = r2(flt(value)); qty = int(qty or 0)
+    if not value > 0:
+        frappe.throw(frappe._("Gift card value must be more than zero"))
+    if not 1 <= qty <= 500:
+        frappe.throw(frappe._("Quantity must be 1 to 500"))
+    import random
+    out = []
+    for _ in range(qty):
+        while True:
+            no = "GC" + str(random.randint(10000000, 99999999))
+            if not frappe.db.exists("POS Gift Card", no) and not frappe.db.exists("POS Printed Gift Card", no):
+                break
+        frappe.get_doc({"doctype": "POS Printed Gift Card", "card_no": no, "value": value, "printed_on": nowdate()}).insert(ignore_permissions=True)
+        out.append({"card_no": no, "value": value})
+    return {"cards": out}
+
+
+def shift_gifts(shift):
+    """Cards sold in a shift per value, the cash part (in the drawer), and what customers paid with cards (no cash)."""
+    by = {}
+    for g in frappe.get_all("POS Gift Card", filters={"shift": shift, "status": ["!=", "Void"]}, fields=["initial"], limit=100000):
+        k = r2(flt(g.initial)); r = by.setdefault(k, {"value": k, "count": 0, "total": 0.0})
+        r["count"] += 1; r["total"] = r2(r["total"] + flt(g.initial))
+    red = frappe.db.sql("""select coalesce(sum(p.amount),0) from `tabSales Invoice Payment` p join `tabSales Invoice` si on si.name=p.parent
+        where si.orbit_shift=%s and si.docstatus=1 and si.is_return=0 and p.mode_of_payment=%s""", (shift, GIFT_MODE))[0][0]
+    return {"by_value": sorted(by.values(), key=lambda x: x["value"]), "sold_cash": r2(cash_gift_sales(shift)), "redeemed": r2(flt(red))}
+
+
+@frappe.whitelist()
+def shift_gift_block(shift):
+    require_pos_user()
+    return shift_gifts(shift)
 
 
 @frappe.whitelist()

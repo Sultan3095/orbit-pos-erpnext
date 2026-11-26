@@ -6,7 +6,7 @@ import Receipt from './Receipt.jsx';
 import Returns from './Returns.jsx';
 import Approvals from './Approvals.jsx';
 import EditInvoice from './EditInvoice.jsx';
-import Gifts from './Gifts.jsx';
+import Gifts, { GiftShiftBlock } from './Gifts.jsx';
 import Coupons from './Coupons.jsx';
 
 const queue = createQueue(window.localStorage);
@@ -294,6 +294,7 @@ export default function App() {
                 <button onClick={() => setCm(null)}>{L('cancel')}</button>
               </div>)}
             <hr />
+            <GiftShiftBlock L={L} fmt={fmt} shift={shift} />
             <label>{L('countedCash')} <input value={counted} onChange={(e) => setCounted(e.target.value)} inputMode="decimal" data-testid="counted" /></label>
             <button onClick={closeShift} data-testid="close">{L('closeShift')}</button>
           </aside>

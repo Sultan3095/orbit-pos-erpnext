@@ -640,6 +640,54 @@ class TestFlows(Base):
             gifts.save_coupon(json.dumps({"code": "NOPE1", "kind": "percent", "value": 5}))
         gifts.void_gift_card(c, "mistake", manager="boss@orbit.test", pin="4321")
 
+    def test_38_gift_cards_by_value_shift_block_and_write_off(self):
+        from orbit_pos.api import gifts, shift
+        sh = self._shift(100)
+        a = gifts.sell_gift_card(733, sh, "Cash")["card_no"]
+        gifts.sell_gift_card(733, sh, "Cash")
+        gifts.sell_gift_card(744, sh, "Cash")
+        blk = gifts.shift_gift_block(sh)
+        self.assertEqual([(r["value"], r["count"], r["total"]) for r in blk["by_value"]], [(733.0, 2, 1466.0), (744.0, 1, 744.0)])
+        self.assertEqual(blk["sold_cash"], 2210.0)
+        before = shift.expected_cash(sh)
+        r = self._sale(sh, [{"itemId": "ORB-A", "qty": 3, "price": 10}], 0, gift_card=a, gift_amount=30)
+        self.assertEqual(flt(r["gift_used"]), 30.0)
+        self.assertEqual(shift.expected_cash(sh), before)            # redeeming moves no drawer cash
+        self.assertEqual(gifts.shift_gift_block(sh)["redeemed"], 30.0)
+        z = shift.z_report(sh)
+        self.assertEqual(z["gift_sold_cash"], 2210.0); self.assertEqual(z["gift_redeemed"], 30.0)
+        row = [x for x in gifts.gift_by_value()["rows"] if x["value"] == 733.0][0]
+        self.assertEqual((row["sold"], row["partly"], row["untouched"]), (2, 1, 1))
+        with self.assertRaises(frappe.ValidationError):
+            gifts.write_off_gift_card(a, "not expired")
+        frappe.db.set_value("POS Gift Card", a, "expires_on", "2020-01-01")
+        with self.assertRaises(frappe.ValidationError):
+            gifts.write_off_gift_card(a, "")
+        r = gifts.write_off_gift_card(a, "expired a year ago")
+        self.assertEqual(r["written_off"], 703.0); self.assertEqual(r["status"], "writtenoff")
+        gl = frappe.db.sql("""select coalesce(sum(debit - credit),0) from `tabGL Entry` where voucher_no=%s and account like %s and is_cancelled=0""",
+                           (r["journal_entry"], "%Gift Card Liability%"))[0][0]
+        self.assertEqual(flt(gl), 703.0)                              # the liability is closed
+        with self.assertRaises(frappe.ValidationError):
+            gifts.write_off_gift_card(a, "again")
+        with self.assertRaises(frappe.ValidationError):
+            self._sale(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 0, gift_card=a)
+        row = [x for x in gifts.gift_by_value()["rows"] if x["value"] == 733.0][0]
+        self.assertEqual((row["written_off_count"], row["written_off_total"]), (1, 703.0))
+
+    def test_39_printed_cards_unique_and_value_checked_on_sale(self):
+        from orbit_pos.api import gifts
+        sh = self._shift()
+        cards = gifts.print_gift_cards(500, 6)["cards"]
+        self.assertEqual(len({c["card_no"] for c in cards}), 6)
+        with self.assertRaises(frappe.ValidationError):
+            gifts.print_gift_cards(500, 0)
+        with self.assertRaises(frappe.ValidationError):
+            gifts.sell_gift_card(200, sh, "Cash", card_no=cards[0]["card_no"])      # printed as 500
+        c = gifts.sell_gift_card(500, sh, "Cash", card_no=cards[0]["card_no"])
+        self.assertEqual(c["card_no"], cards[0]["card_no"])
+        self.assertTrue(frappe.db.get_value("POS Printed Gift Card", cards[0]["card_no"], "sold_on"))
+
     def test_37_theme_is_per_user_and_validated(self):
         from orbit_pos.api import shift
         frappe.set_user("cashier@orbit.test")

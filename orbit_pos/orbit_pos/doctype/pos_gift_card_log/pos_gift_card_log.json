@@ -22,7 +22,7 @@
    "fieldname": "kind",
    "fieldtype": "Select",
    "label": "Kind",
-   "options": "issue\nredeem\nrefund\nvoid-restore\nvoid\nexpiry",
+   "options": "issue\nredeem\nrefund\nvoid-restore\nvoid\nexpiry\nwriteoff",
    "in_list_view": 1
   },
   {

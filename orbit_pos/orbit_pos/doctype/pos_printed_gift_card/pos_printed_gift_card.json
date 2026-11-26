@@ -1,0 +1,59 @@
+{
+ "doctype": "DocType",
+ "name": "POS Printed Gift Card",
+ "module": "Orbit POS",
+ "custom": 0,
+ "issingle": 0,
+ "istable": 0,
+ "engine": "InnoDB",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "autoname": "field:card_no",
+ "fields": [
+  {
+   "fieldname": "card_no",
+   "fieldtype": "Data",
+   "label": "Card No.",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "value",
+   "fieldtype": "Currency",
+   "label": "Printed Value",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "printed_on",
+   "fieldtype": "Date",
+   "label": "Printed On"
+  },
+  {
+   "fieldname": "sold_on",
+   "fieldtype": "Date",
+   "label": "Sold On"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "POS Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "report": 1
+  },
+  {
+   "role": "POS User",
+   "read": 1
+  },
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ]
+}
