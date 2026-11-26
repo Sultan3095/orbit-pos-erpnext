@@ -1,5 +1,6 @@
 export const T = {
   ar: {
+    guideOn: 'المرشد (الراجل اللي بيشاور على الغلط)',
     app: 'أوربت POS', shift: 'الشفت', openShift: 'فتح شفت', closeShift: 'إغلاق الشفت', openingCash: 'نقدية الافتتاح',
     countedCash: 'النقدية الفعلية', sell: 'البيع', scan: 'امسح الباركود أو اكتب 3*الباركود', add: 'إضافة',
     qty: 'الكمية', price: 'السعر', total: 'الإجمالي', subtotal: 'المجموع', discount: 'الخصم', pay: 'دفع',
@@ -13,6 +14,7 @@ export const T = {
     "giftState_writtenoff": "معدوم", "gpCrop": "اطبع علامات القص", "gpDataOnly": "الرقم والـQR والباركود بس (كروت مطبوعة مسبقاً)", "gdHelp": "علامة Orbit ثابتة على كل كارت. اسم المحل واللوجو والألوان والشروط بتتظبط من Orbit POS Settings في الـDesk، ورقة الطباعة بتستخدمهم.", "giftPrintCards": "طباعة كروت", "giftByValue": "حسب فئة الكارت", "giftValueCol": "الفئة", "giftSoldCol": "اتباع", "giftUsedCol": "مستخدم بالكامل", "giftPartlyCol": "مستخدم جزئي", "giftUntouchedCol": "لم يُستخدم", "giftOpenCol": "مفتوح (عدد / رصيد)", "giftExpiredCol": "منتهي (عدد / رصيد)", "giftWrittenOffCol": "معدوم", "giftWriteOff": "إعدام الرصيد", "giftWriteOffHelp": "الكارت منتهي. الرصيد بيخرج من الالتزام ويتسجل كإيراد انتهاء كروت بقيد يومية، والإعدام بيتسجل بالسبب. المحاسب يراجعه.", "giftQty": "عدد الكروت", "giftPrintHelp": "بيطبع ورق A4 فيه 8 كروت (85.6 × 54 مم) وصفحة ظهر. رقم الكارت والـQR والباركود بيتولدوا من النظام. وانت بتبيع كارت مطبوع اكتب رقمه: القيمة لازم تطابق المطبوع.", "giftShiftBlock": "كروت الهدية المباعة في الشيفت", "giftSoldCash": "منها كاش (في الدرج)", "giftRedeemedLine": "مدفوع بكروت هدية (مش كاش، مفيش تأثير على الدرج)", "giftLog_writeoff": "إعدام رصيد منتهي", "giftPrintNow": "اطبع", "giftSheetReady": "الكروت جاهزة للطباعة",
   },
   en: {
+    guideOn: 'Guide (the man who points at the mistake)',
     app: 'Orbit POS', shift: 'Shift', openShift: 'Open shift', closeShift: 'Close shift', openingCash: 'Opening cash',
     countedCash: 'Counted cash', sell: 'Sell', scan: 'Scan barcode or type 3*barcode', add: 'Add',
     qty: 'Qty', price: 'Price', total: 'Total', subtotal: 'Subtotal', discount: 'Discount', pay: 'Pay',

@@ -8,6 +8,7 @@ import Approvals from './Approvals.jsx';
 import EditInvoice from './EditInvoice.jsx';
 import Gifts, { GiftShiftBlock } from './Gifts.jsx';
 import Coupons from './Coupons.jsx';
+import { showGuide, closeGuide, guideOff, setGuideOff } from './guide.js';
 
 const queue = createQueue(window.localStorage);
 const TERMINAL = localStorage.getItem('orbit_terminal') || (localStorage.setItem('orbit_terminal', 'T' + Math.random().toString(36).slice(2, 6)), localStorage.getItem('orbit_terminal'));
@@ -51,6 +52,9 @@ export default function App() {
   const [pending, setPending] = useState(queue.list().length);
   const counter = useRef(Number(localStorage.getItem('orbit_counter') || 0));
   const L = (k) => t(lang, k);
+  const [gOff, setGOff] = useState(false);
+  useEffect(() => { setGOff(guideOff(me)); }, [me]);
+  const hint = (key, force) => showGuide(key, { lang, user: me, force });
 
   useEffect(() => {
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
@@ -86,7 +90,7 @@ export default function App() {
     api('sales.quote', { payload: JSON.stringify({ lines: cart.map(({ itemId, group, qty, price }) => ({ itemId, group, qty, price })), coupon: couponCode || undefined, customer: customer ? customer.name : undefined, shift: shift ? shift.name : undefined }) })
       .then((q) => { if (live) setQuote(q); }).catch((err) => {
         if (!live) return;
-        if (couponCode && err.permanent) { setMsg(err.message); setCouponCode(''); return; }   // a coupon the server refuses is dropped, with the reason
+        if (couponCode && err.permanent) { setMsg(err.message); setCouponCode(''); hint('COUPON'); return; }   // a coupon the server refuses is dropped, with the reason
         setQuote(localQuote(cart));
       });
     return () => { live = false; };
@@ -118,7 +122,7 @@ export default function App() {
         return [...cur, { itemId: it.name, name: it.item_name, group: it.item_group, price: it.price, qty: q, hasSerial: !!it.has_serial_no, serials: '' }];
       });
       setCode('');
-    } catch (err) { setMsg(L('notFound') + ': ' + c); }
+    } catch (err) { setMsg(L('notFound') + ': ' + c); hint('NOT_FOUND'); }
   }
 
   const paid = (Number(cashPaid) || 0) + (Number(cardPaid) || 0) + credit + giftCover;
@@ -137,12 +141,12 @@ export default function App() {
     setMsg('');
     if (!couponIn.trim()) return;
     try { await api('sales.quote', { payload: JSON.stringify({ lines: cart.map(({ itemId, group, qty, price }) => ({ itemId, group, qty, price })), coupon: couponIn.trim(), customer: customer ? customer.name : undefined, shift: shift.name }) }); setCouponCode(couponIn.trim().toUpperCase()); setCouponIn(''); setMsg(L('cpApplied')); }
-    catch (err) { setMsg(err.message); }
+    catch (err) { setMsg(err.message); hint('COUPON'); }
   }
   async function applyGift() {
     setMsg('');
-    try { const g = await api('gifts.check_gift_card', { card_no: giftNo }); if (g.status !== 'active') { setMsg(giftNo + ': ' + L('giftState_' + g.status)); return; } setGift(g); }
-    catch (err) { setMsg(err.message); }
+    try { const g = await api('gifts.check_gift_card', { card_no: giftNo }); if (g.status !== 'active') { setMsg(giftNo + ': ' + L('giftState_' + g.status)); hint('GIFT'); return; } setGift(g); }
+    catch (err) { setMsg(err.message); hint('GIFT'); }
   }
   async function newCustomer() {
     try { const c = await api('exchange.create_customer', { customer_name: newCust.name, mobile_no: newCust.phone }); setCustomer(c); setNewCust(null); setCustQ(''); setCustList([]); }
@@ -276,7 +280,9 @@ export default function App() {
             <label>{L('card')} <input value={cardPaid} onChange={(e) => setCardPaid(e.target.value)} inputMode="decimal" data-testid="card" /></label>
             {Number(cardPaid) > 0 && <label>{L('cardRef')} <input value={cardRef} onChange={(e) => setCardRef(e.target.value)} data-testid="card-ref" /></label>}
             <div>{L('remaining')}: {fmt(remaining)} · {L('change')}: {fmt(change)}</div>
-            <button className="primary" disabled={!canPay} onClick={pay} data-testid="pay">{L('pay')}</button>
+            <span data-testid="pay-wrap" onClick={() => { if (canPay) return; hint(!cart.length ? 'EMPTY_CART' : !serialsOk ? 'SERIALS' : 'UNDERPAID'); }}>
+              <button className="primary" disabled={!canPay} style={canPay ? undefined : { pointerEvents: 'none' }} onClick={() => { closeGuide(); pay(); }} data-testid="pay">{L('pay')}</button></span>
+            {' '}<label className="muted"><input type="checkbox" checked={!gOff} onChange={(e) => { setGuideOff(me, !e.target.checked); setGOff(!e.target.checked); }} data-testid="guide-switch" /> {L('guideOn')}</label>
             <hr />
             <button onClick={() => setCm({ direction: 'Out', amount: '', reason: '', manager: '', pin: '', needPin: false, err: '' })} data-testid="cash-out">{L('cashOut')}</button>
             <button onClick={() => setCm({ direction: 'In', amount: '', reason: '', manager: '', pin: '', needPin: false, err: '' })} data-testid="cash-in">{L('cashIn')}</button>

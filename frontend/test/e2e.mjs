@@ -30,6 +30,19 @@ try {
   // unknown item
   await p.type('[data-testid=scan]', '999'); await p.keyboard.press('Enter'); await new Promise((r) => setTimeout(r, 300));
   assert.ok((await txt('[data-testid=msg]')).includes('Item not found'));
+  // guide mascot: appears on the mistake, points at the scan field, explains when tapped, dismissible, once per issue
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  await p.waitForSelector('#guide[data-guide=NOT_FOUND]'); await p.screenshot({ path: OUT + '/guide-1-not-found-en.png' });
+  await p.click('#guide .gman'); await p.waitForSelector('#guide [data-g=ok]'); await p.screenshot({ path: OUT + '/guide-2-explain-en.png' });
+  await p.click('#guide [data-g=ok]'); await sleep(200); assert.equal(await p.$('#guide'), null, 'guide dismissed');
+  await p.type('[data-testid=scan]', '999'); await p.keyboard.press('Enter'); await sleep(500);
+  assert.equal(await p.$('#guide'), null, 'guide shows once per issue');
+  await p.evaluate(() => { const b = [...document.querySelectorAll('button')].find((x) => /Close/.test(x.textContent) && /إغلاق/.test(x.textContent)); if (b) b.click(); }); await sleep(300);
+  await p.click('[data-testid=pay-wrap]'); await p.waitForSelector('#guide[data-guide=EMPTY_CART]');
+  await p.screenshot({ path: OUT + '/guide-3-empty-cart-en.png' }); await p.click('#guide [data-g=x]'); await sleep(200);
+  assert.equal(await p.$('#guide'), null);
+  await p.click('[data-testid=guide-switch]'); await p.click('[data-testid=pay-wrap]'); await sleep(400); assert.equal(await p.$('#guide'), null, 'guide switched off');
+  await p.click('[data-testid=guide-switch]');
   await p.select('[data-testid=theme]', 'dark'); await p.screenshot({ path: OUT + '/4-dark.png' });
   // petty cash: reason is mandatory, small cash-out saves, large one asks for the manager PIN
   await p.click('[data-testid=cash-out]'); await p.waitForSelector('[data-testid=cm-dialog]');
