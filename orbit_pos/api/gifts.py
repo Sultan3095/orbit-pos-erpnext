@@ -87,20 +87,31 @@ def card_info(c):
             "expires_on": str(c.expires_on or ""), "customer_name": c.customer_name or ""}
 
 
+def _miss_state():
+    """(cache key, wrong lookups in the last 5 minutes). The window is kept in the value, not as a cache expiry."""
+    import time
+    key = "orbit_gift_miss:" + frappe.session.user
+    v = frappe.cache().get_value(key)
+    if isinstance(v, dict) and time.time() - flt(v.get("t")) < 300:
+        return key, int(v.get("n") or 0), flt(v.get("t"))
+    return key, 0, time.time()
+
+
 def _throttle():
     """Card numbers are bearer money: at most 10 wrong lookups per user in 5 minutes."""
-    key = "orbit_gift_miss:" + frappe.session.user
-    if flt(frappe.cache().get_value(key)) >= 10:
+    key, n, _ = _miss_state()
+    if n >= 10:
         frappe.throw(frappe._("Too many wrong gift card numbers. Wait a few minutes and try again"), frappe.PermissionError)
     return key
 
 
 def _lookup(card_no):
-    key = _throttle()
+    _throttle()
     try:
         return _card(card_no)
     except frappe.DoesNotExistError:
-        frappe.cache().set_value(key, flt(frappe.cache().get_value(key)) + 1, expires_in_sec=300)
+        key, n, t = _miss_state()
+        frappe.cache().set_value(key, {"n": n + 1, "t": t})
         raise
 
 

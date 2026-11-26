@@ -278,8 +278,10 @@ def _submit_sale(payload):
     for pay in p.get("payments", []):
         if pay["method"] in (gifts.GIFT_MODE, CREDIT_MODE):
             frappe.throw(frappe._("Use the gift card field or the exchange receipt field for this"))
+        if flt(pay.get("amount")) < 0:
+            frappe.throw(frappe._("A payment amount cannot be negative"))
         if not flt(pay.get("amount")) > 0:
-            frappe.throw(frappe._("Each payment amount must be more than zero"))
+            continue    # an empty row (for example 0 cash when a gift card or exchange receipt covers it)
         if pay["method"] not in allowed:
             frappe.throw(frappe._("Payment method {0} is not on this POS Profile").format(pay["method"]))
         si.append("payments", {"mode_of_payment": pay["method"], "amount": flt(pay["amount"]),
@@ -426,7 +428,8 @@ def create_return(invoice, items, manager=None, pin=None, current_branch=None, m
     orig = frappe.get_doc("Sales Invoice", invoice)
     if orig.docstatus != 1 or orig.is_return:
         frappe.throw(frappe._("Cannot return this document"))
-    my_shift = frappe.db.get_value("POS Shift", {"user": frappe.session.user, "status": "Open"}, "name")
+    my_shift = frappe.db.get_value("POS Shift", {"user": frappe.session.user, "status": "Open"}, "name") or \
+        frappe.db.get_value("POS Shift", {"shared_shift": 1, "status": "Open"}, "name", order_by="creation desc")
     if not my_shift and not frappe.flags.get("orbit_revision"):
         frappe.throw(frappe._("Open a shift before a return: the refund must be counted in a drawer"))
     if not cross_branch_allowed(orig.orbit_branch or "", current_branch or "", bool(s.allow_cross_branch_returns)):
