@@ -195,7 +195,7 @@ def my_permissions():
     from .common import role_of, matrix, DEFAULTS
     role = role_of()
     return {"role": role, "perms": {k: perm(k) for k in DEFAULTS}, "user": frappe.session.user,
-            "theme": frappe.db.get_default("orbit_theme") or ""}
+            "theme": frappe.db.get_value("DefaultValue", {"parent": frappe.session.user, "defkey": "orbit_theme"}, "defvalue") or ""}
 
 
 THEMES = ("brand", "galaxy", "light", "dark")
