@@ -1,0 +1,30 @@
+{
+ "doctype": "DocType",
+ "name": "POS ETA Receipt",
+ "module": "Orbit POS",
+ "custom": 0,
+ "issingle": 0,
+ "istable": 0,
+ "engine": "InnoDB",
+ "autoname": "ETA-.#####",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "fields": [
+  {"fieldname": "sales_invoice", "fieldtype": "Link", "label": "Sales Invoice", "options": "Sales Invoice", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "receipt_uuid", "fieldtype": "Data", "label": "Receipt UUID", "in_list_view": 1},
+  {"fieldname": "state", "fieldtype": "Select", "label": "State", "options": "queued\nsubmitted\naccepted\nrejected", "default": "queued", "in_list_view": 1},
+  {"fieldname": "environment", "fieldtype": "Data", "label": "Environment", "default": "mock"},
+  {"fieldname": "receipt_json", "fieldtype": "Code", "label": "Receipt Document"},
+  {"fieldname": "signed_json", "fieldtype": "Code", "label": "Signed Envelope"},
+  {"fieldname": "submission_uuid", "fieldtype": "Data", "label": "Submission UUID"},
+  {"fieldname": "long_id", "fieldtype": "Data", "label": "ETA Long ID", "in_list_view": 1},
+  {"fieldname": "error", "fieldtype": "Small Text", "label": "Rejection Error"},
+  {"fieldname": "submitted_at", "fieldtype": "Datetime", "label": "Submitted At"}
+ ],
+ "permissions": [
+  {"role": "POS Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "report": 1, "export": 1},
+  {"role": "POS User", "read": 1, "report": 1},
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}
+ ]
+}

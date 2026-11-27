@@ -91,7 +91,7 @@
    "fieldname": "approval_status",
    "fieldtype": "Select",
    "label": "Close approval",
-   "options": "\nAuto\nPending\nApproved",
+   "options": "\nAuto\nPending\nApproved\nRecount",
    "read_only": 1
   },
   {
@@ -99,6 +99,13 @@
    "fieldtype": "Link",
    "options": "User",
    "label": "Close approved by",
+   "read_only": 1
+  },
+  {
+   "fieldname": "second_approved_by",
+   "fieldtype": "Link",
+   "label": "Second Approver",
+   "options": "User",
    "read_only": 1
   },
   {

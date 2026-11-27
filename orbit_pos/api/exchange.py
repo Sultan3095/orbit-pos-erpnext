@@ -114,7 +114,7 @@ def active_promotions():
         out.append({"name": doc.promo_name, "type": doc.promo_type, "scope_type": e["scope"]["type"], "scope": scope,
                     "buy": p["buy"], "get": p["get"], "get_pct": p["getPct"], "percent": p["percent"], "amount": p["amount"],
                     "bundle_qty": p["qty"], "bundle_price": p["price"], "min_total": p["minTotal"],
-                    "end": e["end"]})
+                    "end": e["end"], "engine": e})
     return out
 
 

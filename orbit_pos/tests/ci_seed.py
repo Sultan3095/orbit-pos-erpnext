@@ -39,7 +39,7 @@ def run():
             u = frappe.get_doc("User", role_user); u.orbit_pos_pin = pin; u.save()
     if not frappe.db.exists("POS Promotion", {"promo_name": "Buy 2 get 3 Chips"}):
         frappe.get_doc({"doctype": "POS Promotion", "promo_name": "Buy 2 get 3 Chips", "promo_type": "bxgy", "buy_qty": 2,
-                        "get_qty": 3, "enabled": 1}).insert()
+                        "get_qty": 3, "scope_type": "Item", "scope_item": "Chips", "enabled": 1}).insert()
     tf.enable_serial()
     if not frappe.db.exists("Item", "Phone"):
         frappe.get_doc({"doctype": "Item", "item_code": "Phone", "item_name": "Phone", "item_group": leaf("Item Group"),
@@ -57,14 +57,16 @@ def run():
     st.receipt_terms_en = "Exchange within the stated period, item in original condition, invoice required."
     st.save()
     from orbit_pos.api import sales, shift
-    # an earlier closed shift with sales, a return, a cash movement and a manager approval, so lists are not empty
-    sh = shift.open_shift(name, 100)["name"]
-    pay = lambda t, lines, amt, **kw: json.dumps({"txn_id": t, "shift": sh, "lines": lines, "payments": [{"method": "Cash", "amount": amt}], **kw})
-    r1 = sales.submit_sale(pay("DEMO-1", [{"itemId": "Chips", "qty": 5, "price": 4}, {"itemId": "Juice", "qty": 2, "price": 12}], 50))
-    sales.submit_sale(pay("DEMO-2", [{"itemId": "Water", "qty": 3, "price": 5}], 20))
-    sales.create_return(r1["sales_invoice"], json.dumps([{"item_code": "Juice", "qty": 1}]))
-    shift.cash_movement(sh, "Out", 10, "tea and cleaning supplies")
-    shift.close_shift(sh, 120)
+    # an earlier closed shift with sales, a return, a cash movement and a manager approval, so lists are not empty.
+    # Idempotent: the workflow seeds once for screenshots and again inside concurrency_fixtures.
+    if not frappe.db.exists("Sales Invoice", {"orbit_txn_id": "DEMO-1"}):
+        sh = shift.open_shift(name, 100)["name"]
+        pay = lambda t, lines, amt, **kw: json.dumps({"txn_id": t, "shift": sh, "lines": lines, "payments": [{"method": "Cash", "amount": amt}], **kw})
+        r1 = sales.submit_sale(pay("DEMO-1", [{"itemId": "Chips", "qty": 5, "price": 4}, {"itemId": "Juice", "qty": 2, "price": 12}], 50))
+        sales.submit_sale(pay("DEMO-2", [{"itemId": "Water", "qty": 3, "price": 5}], 20))
+        sales.create_return(r1["sales_invoice"], json.dumps([{"item_code": "Juice", "qty": 1}]))
+        shift.cash_movement(sh, "Out", 10, "tea and cleaning supplies")
+        shift.close_shift(sh, 120)
     frappe.db.commit()
     print("seed done", frappe.get_all("Sales Invoice", pluck="name"))
 
@@ -86,3 +88,17 @@ def pending_close():
     z = shift.close_shift(sh, 110)
     frappe.db.commit()
     open("/tmp/orbit_pending.json", "w").write(json.dumps({"shift": sh, "invoice": r["sales_invoice"], "pending": z.get("pending")}))
+
+
+def concurrency_fixtures():
+    """CI helper: data for tools/concurrency_test.py (two terminals at once). Prints one FIXTURES json line."""
+    frappe.set_user("Administrator")
+    run()
+    from orbit_pos.api import gifts, sales, shift
+    sh = shift.open_shift("Orbit Demo Profile", 0)["name"]
+    card = gifts.sell_gift_card(40, sh)["card_no"]
+    gifts.save_coupon(json.dumps({"code": "RACE1", "kind": "percent", "value": 10, "max_uses": 1}))
+    walkin = frappe.db.get_value("POS Profile", "Orbit Demo Profile", "customer")
+    rec = sales._issue_receipt(walkin, 30, None, sh)
+    frappe.db.commit()
+    print("FIXTURES " + json.dumps({"shift": sh, "card": card, "coupon": "RACE1", "receipt": rec.name}))

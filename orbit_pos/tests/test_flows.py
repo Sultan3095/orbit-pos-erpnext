@@ -805,3 +805,148 @@ class TestFlows(Base):
         with self.assertRaises(frappe.PermissionError):
             frappe.db.set_value("POS Shift", {"user": "cashier@orbit.test"}, "status", "Closed")
             shift.open_shift(self.profile, 50, shared=1)
+
+    # ---- provider payments and ETA e-receipts (mock mode, built from the docs)
+    def _settings(self, **kw):
+        st = frappe.get_doc("Orbit POS Settings")
+        for k, v in kw.items():
+            st.set(k, v)
+        st.save()
+        return st
+
+    def test_50_paymob_mock_flow_and_sale_consumption(self):
+        from orbit_pos.api import payments, sales
+        self._settings(payments_mode="mock", paymob_public_key="pk_mock", paymob_integration_ids="12345")
+        st = frappe.get_doc("Orbit POS Settings"); st.paymob_secret_key = "sk_mock"; st.save()
+        frappe.set_user("cashier@orbit.test"); sh = self._shift(100)
+        txn = "T-" + uuid.uuid4().hex[:8]
+        att = payments.create_payment("paymob", json.dumps({"txn_id": txn, "shift": sh, "amount": 10,
+                                                            "lines": [{"itemId": "ORB-A", "name": "ORB-A", "qty": 1, "price": 10}]}))
+        self.assertEqual(att["state"], "pending")
+        self.assertIn("publicKey=pk_mock", att["checkout_url"])
+        with self.assertRaises(frappe.ValidationError):          # not paid yet
+            sales.submit_sale(self._payload(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 0,
+                                            txn_id=txn, payments=[{"method": "Paymob", "amount": 10, "attempt": att["name"]}]))
+        payments.mock_settle(att["name"], "paid")
+        r = sales.submit_sale(self._payload(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 0,
+                                          txn_id=txn, payments=[{"method": "Paymob", "amount": 10, "attempt": att["name"]}]))
+        self.assertEqual(r["status"], "created")
+        si = frappe.get_doc("Sales Invoice", r["sales_invoice"])
+        self.assertEqual(si.payments[0].mode_of_payment, "Paymob")
+        with self.assertRaises(frappe.DuplicateEntryError):      # one attempt, one sale
+            sales.submit_sale(self._payload(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 0,
+                                            txn_id="T-" + uuid.uuid4().hex[:8],
+                                            payments=[{"method": "Paymob", "amount": 10, "attempt": att["name"]}]))
+
+    def test_51_provider_payments_off_are_refused_and_fawry_mock(self):
+        from orbit_pos.api import payments, sales
+        self._settings(payments_mode="off")
+        frappe.set_user("cashier@orbit.test"); sh = self._shift(100)
+        with self.assertRaises(frappe.ValidationError):
+            payments.create_payment("fawry", json.dumps({"txn_id": "X-1", "shift": sh, "amount": 4, "lines": []}))
+        self._settings(payments_mode="mock", fawry_merchant_code="MC1")
+        st = frappe.get_doc("Orbit POS Settings"); st.fawry_secure_key = "sekret"; st.save()
+        att = payments.create_payment("fawry", json.dumps({"txn_id": "X-2", "shift": sh, "amount": 4,
+                                                           "lines": [{"itemId": "ORB-B", "name": "ORB-B", "qty": 1, "price": 4}]}))
+        self.assertTrue(att["provider_ref"].startswith("FAWRY-"))
+        self.assertIn("Fawry", att["instructions"])
+        payments.mock_settle(att["name"], "paid")
+        r = sales.submit_sale(self._payload(sh, [{"itemId": "ORB-B", "qty": 1, "price": 4}], 0,
+                                            txn_id="X-2", payments=[{"method": "Fawry", "amount": 4, "attempt": att["name"]}]))
+        self.assertEqual(r["status"], "created")
+
+    def test_52_eta_queue_submit_accept_and_reject(self):
+        from orbit_pos.api import eta, sales
+        self._settings(eta_enabled=1, eta_environment="Mock", eta_seller_id="113317713", eta_seller_name="Orbit Test",
+                       eta_governate="Cairo", eta_region_city="Nasr City", eta_street="10 St", eta_building="10", eta_branch_id="1")
+        frappe.set_user("cashier@orbit.test"); sh = self._shift(100)
+        r = sales.submit_sale(self._payload(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 10))
+        name = frappe.db.get_value("POS ETA Receipt", {"sales_invoice": r["sales_invoice"]}, "name")
+        self.assertTrue(name, "receipt was queued on sale")
+        frappe.set_user("Administrator")
+        info = eta.eta_submit(name)
+        self.assertEqual(info["state"], "accepted")
+        self.assertTrue(info["long_id"].startswith("MOCK"))
+        with self.assertRaises(frappe.ValidationError):          # no double submission
+            eta.eta_submit(name)
+        rec = frappe.get_doc("POS ETA Receipt", name)
+        rec.state = "rejected"; rec.error = "x"; rec.save()
+        eta.eta_retry(name)
+        self.assertEqual(frappe.db.get_value("POS ETA Receipt", name, "state"), "queued")
+
+    def test_53_eta_off_queues_nothing_and_live_refuses(self):
+        from orbit_pos.api import eta, sales
+        self._settings(eta_enabled=0)
+        frappe.set_user("cashier@orbit.test"); sh = self._shift(100)
+        r = sales.submit_sale(self._payload(sh, [{"itemId": "ORB-A", "qty": 1, "price": 10}], 10))
+        self.assertFalse(frappe.db.exists("POS ETA Receipt", {"sales_invoice": r["sales_invoice"]}))
+        self._settings(eta_enabled=1, eta_environment="Preprod")
+        frappe.set_user("Administrator")
+        rec = frappe.get_doc({"doctype": "POS ETA Receipt", "sales_invoice": r["sales_invoice"], "state": "queued",
+                              "receipt_json": json.dumps({"header": {"uuid": "0" * 64, "receiptNumber": "X",
+                                                                     "dateTimeIssued": "2026-01-01T00:00:00Z"}})})
+        rec.insert(ignore_permissions=True)
+        with self.assertRaises(frappe.ValidationError):
+            eta.eta_submit(rec.name)
+
+    def test_54_loyalty_redemption_needs_registered_phone_or_manager_pin(self):
+        from orbit_pos.api import sales
+        st = frappe.get_doc("Orbit POS Settings"); st.currency_per_point = 1; st.value_per_point = 1; st.save()
+        if not frappe.db.exists("Customer", "Loyal Mona"):
+            frappe.get_doc({"doctype": "Customer", "customer_name": "Loyal Mona", "customer_group": leaf("Customer Group"),
+                            "territory": leaf("Territory"), "mobile_no": "0105551234"}).insert()
+        frappe.set_user("cashier@orbit.test"); sh = self._shift(100)
+        line = [{"itemId": "ORB-A", "qty": 1, "price": 10}]
+        r = sales.submit_sale(self._payload(sh, line, 10, customer="Loyal Mona"))          # earns 10 points
+        self.assertEqual(r["status"], "created")
+        with self.assertRaises(frappe.PermissionError):                                    # no phone, no PIN
+            sales.submit_sale(self._payload(sh, line, 5, customer="Loyal Mona", redeem_points=5))
+        with self.assertRaises(frappe.PermissionError):                                    # wrong phone
+            sales.submit_sale(self._payload(sh, line, 5, customer="Loyal Mona", redeem_points=5, loyalty_phone="0109999999"))
+        r2 = sales.submit_sale(self._payload(sh, line, 5, customer="Loyal Mona", redeem_points=5, loyalty_phone="0105551234"))
+        self.assertEqual(r2["status"], "created")                                          # registered phone, no PIN needed
+        r3 = sales.submit_sale(self._payload(sh, line, 5, customer="Loyal Mona", redeem_points=5,
+                                           manager="boss@orbit.test", pin="4321"))         # manager override, no phone
+        self.assertEqual(r3["status"], "created")
+        self.assertTrue(frappe.db.exists("POS Manager Approval", {"action": "Loyalty Phone Override",
+                                                                  "requested_by": "cashier@orbit.test"}))
+
+    def test_55_recount_send_back_and_second_approval(self):
+        from orbit_pos.api import shift
+        if not frappe.db.exists("User", "boss2@orbit.test"):
+            u = frappe.get_doc({"doctype": "User", "email": "boss2@orbit.test", "first_name": "boss2", "send_welcome_email": 0,
+                                "roles": [{"role": "POS Manager"}, {"role": "Sales User"}, {"role": "Stock User"},
+                                        {"role": "Accounts User"}]}).insert()
+        u = frappe.get_doc("User", "boss2@orbit.test"); u.orbit_pos_pin = "9876"; u.save()
+        st = frappe.get_doc("Orbit POS Settings"); st.second_approval_above = 100; st.save()
+        try:
+            frappe.set_user("cashier@orbit.test"); sh = self._shift(100)
+            z = shift.close_shift(sh, 90)                                  # blind close, wrong count
+            self.assertTrue(z["pending"])
+            frappe.set_user("boss@orbit.test")
+            rb = shift.send_back_for_recount(sh, note="count again")       # approver sends it back
+            self.assertEqual(rb["approval_status"], "Recount")
+            with self.assertRaises(frappe.ValidationError):                # cannot approve a sent-back close
+                shift.approve_close(sh)
+            frappe.set_user("cashier@orbit.test")
+            with self.assertRaises(frappe.ValidationError):              # negative count refused
+                shift.recount_shift(sh, -1)
+            rc = shift.recount_shift(sh, 80, "recounted")                  # new count, back to Pending
+            self.assertTrue(rc["pending"])
+            frappe.set_user("boss@orbit.test")
+            z2 = shift.approve_close(sh, note="accepted")                  # diff 20 < 100: one approver is enough
+            self.assertEqual(z2["approval_status"], "Approved")
+            self.assertFalse(frappe.db.get_value("POS Shift", sh, "second_approved_by"))
+            frappe.set_user("cashier@orbit.test"); sh2 = self._shift(100)
+            shift.close_shift(sh2, 250)                                    # diff +150 > threshold 100
+            frappe.set_user("boss@orbit.test")
+            with self.assertRaises(frappe.PermissionError):                # no second manager at all
+                shift.approve_close(sh2, note="big diff")
+            with self.assertRaises(frappe.PermissionError):                # second approver same as first
+                shift.approve_close(sh2, note="big diff", second_manager="boss@orbit.test", second_pin="4321")
+            z3 = shift.approve_close(sh2, note="big diff", second_manager="boss2@orbit.test", second_pin="9876")
+            self.assertEqual(z3["approval_status"], "Approved")
+            self.assertEqual(frappe.db.get_value("POS Shift", sh2, "second_approved_by"), "boss2@orbit.test")
+            self.assertTrue(frappe.db.exists("POS Manager Approval", {"action": "Close Second Approval", "shift": sh2}))
+        finally:
+            st = frappe.get_doc("Orbit POS Settings"); st.second_approval_above = 0; st.save()

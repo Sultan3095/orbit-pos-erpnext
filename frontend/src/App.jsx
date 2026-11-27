@@ -5,6 +5,8 @@ import { createQueue, newTxnId } from './queue.js';
 import Receipt from './Receipt.jsx';
 import Returns from './Returns.jsx';
 import Approvals from './Approvals.jsx';
+import Eta from './Eta.jsx';
+import { applyPromotions, r2 as pr2 } from './promosLocal.js';
 import EditInvoice from './EditInvoice.jsx';
 import Gifts, { GiftShiftBlock } from './Gifts.jsx';
 import Coupons from './Coupons.jsx';
@@ -41,6 +43,7 @@ export default function App() {
   const [custList, setCustList] = useState([]);
   const [newCust, setNewCust] = useState(null);
   const [promos, setPromos] = useState([]);
+  const promosRef = useRef([]);
   const [rc, setRc] = useState(null);                      // receipt being shown / printed
   const [xr, setXr] = useState(null);                      // exchange receipt applied to this sale
   const [xrCode, setXrCode] = useState('');
@@ -49,6 +52,9 @@ export default function App() {
   const [giftNo, setGiftNo] = useState('');
   const [giftAmt, setGiftAmt] = useState('');
   const [gift, setGift] = useState(null);                  // checked gift card applied to this sale
+  const [payCfg, setPayCfg] = useState({ mode: 'off', providers: [] });
+  const [prov, setProv] = useState(null);                  // open provider payment attempt (Paymob / Fawry)
+  const [provTxn, setProvTxn] = useState('');              // txn id reserved for that attempt
   const [pending, setPending] = useState(queue.list().length);
   const [failed, setFailed] = useState(queue.failed());
   const counter = useRef(Number(localStorage.getItem('orbit_counter') || 0));
@@ -65,10 +71,10 @@ export default function App() {
     if (me) localStorage.setItem('orbit_theme:' + me, theme);
   }, [lang, theme, me]);
 
-  useEffect(() => { api('shift.my_permissions').then((r) => { setPerms(r.perms || {}); if (r.user) { setMe(r.user); setTheme(normTheme(r.theme || localStorage.getItem('orbit_theme:' + r.user) || localStorage.getItem('orbit_theme'))); } }).catch(() => setPerms({})); }, []);
+  useEffect(() => { api('payments.config').then(setPayCfg).catch(() => {}); api('shift.my_permissions').then((r) => { setPerms(r.perms || {}); if (r.user) { setMe(r.user); setTheme(normTheme(r.theme || localStorage.getItem('orbit_theme:' + r.user) || localStorage.getItem('orbit_theme'))); } }).catch(() => setPerms({})); }, []);
   const refreshShift = useCallback(async () => { try { setShift(await api('shift.current_shift')); setOnline(true); } catch (e) { setOnline(false); } }, []);
   useEffect(() => { refreshShift(); }, [refreshShift]);
-  useEffect(() => { if (shift) api('exchange.active_promotions').then((r) => { setPromos(r); localStorage.setItem('orbit_promos', JSON.stringify(r)); }).catch(() => setPromos(JSON.parse(localStorage.getItem('orbit_promos') || '[]'))); }, [shift]);
+  useEffect(() => { if (shift) api('exchange.active_promotions').then((r) => { setPromos(r); promosRef.current = r; localStorage.setItem('orbit_promos', JSON.stringify(r)); }).catch(() => { const c = JSON.parse(localStorage.getItem('orbit_promos') || '[]'); setPromos(c); promosRef.current = c; }); }, [shift]);
   useEffect(() => {
     if (custQ.trim().length < 2) { setCustList([]); return; }
     let live = true;
@@ -94,7 +100,7 @@ export default function App() {
       .then((q) => { if (live) setQuote(q); }).catch((err) => {
         if (!live) return;
         if (couponCode && err.permanent) { setMsg(fail(err)); setCouponCode(''); hint('COUPON'); return; }   // a coupon the server refuses is dropped, with the reason
-        setQuote(localQuote(cart));
+        setQuote(localQuote(cart, promosRef.current));
       });
     return () => { live = false; };
   }, [cart, couponCode, customer]);
@@ -128,13 +134,32 @@ export default function App() {
     } catch (err) { setMsg(L('notFound') + ': ' + c); hint('NOT_FOUND'); }
   }
 
-  const paid = (Number(cashPaid) || 0) + (Number(cardPaid) || 0) + credit + giftCover;
+  const provPaid = prov && prov.state === 'paid' ? Number(prov.amount) || 0 : 0;
+  const paid = (Number(cashPaid) || 0) + (Number(cardPaid) || 0) + credit + giftCover + provPaid;
   const remaining = Math.max(0, total - paid);
   const change = Math.max(0, paid - total);
   // offline the screen has no server prices: when an offer or coupon could change the total, selling would charge
   // the wrong amount, so Pay waits for the connection
-  const offlineBlock = !!(quote && quote.local && (couponCode || promoMayApply(promos, cart)));
+  // offline the screen prices offers itself (same rules as the server). Only a coupon still waits for the
+  // connection, because its validity and usage limits live on the server. A promo list cached before the
+  // offline engine existed (no .engine) also waits: its totals could be wrong.
+  const promosLegacy = (promosRef.current || []).some((p) => !p.engine);
+  const offlineBlock = !!(quote && quote.local && (couponCode || promosLegacy));
   const canPay = cart.length && quote && paid + 0.005 >= total && shift && serialsOk && !offlineBlock;
+  useEffect(() => { if (prov && prov.state !== 'paid') { setProv(null); setProvTxn(''); } }, [cart]);
+  async function startProv(provider) {
+    setMsg('');
+    const amount = remaining;
+    if (!(amount > 0)) { hint('EMPTY_CART'); return; }
+    const txn = provTxn || newTxnId(TERMINAL, counter.current + 1);
+    try {
+      const r = await api('payments.create_payment', { provider, payload: JSON.stringify({ txn_id: txn, shift: shift.name, amount, currency: 'EGP', lines: cart.map(({ itemId, group, qty, price }) => ({ itemId, group, qty, price })), ...(customer ? { customer: customer.name } : {}) }) });
+      setProvTxn(txn); setProv(r);
+    } catch (e) { setMsg(fail(e)); }
+  }
+  async function checkProv() { try { setProv(await api('payments.payment_status', { name: prov.name })); } catch (e) { setMsg(fail(e)); } }
+  async function settleProv() { try { setProv(await api('payments.mock_settle', { name: prov.name, state: 'paid' })); } catch (e) { setMsg(fail(e)); } }
+
   async function applyReceipt(name) {
     setMsg('');
     try {
@@ -165,14 +190,15 @@ export default function App() {
     const payments = [];
     if (cash) payments.push({ method: 'Cash', amount: cash });
     if (card) payments.push({ method: 'Credit Card', amount: card, ref: cardRef });
-    const payload = { txn_id: newTxnId(TERMINAL, counter.current), terminal: TERMINAL, shift: shift.name,
+    if (prov && prov.state === 'paid') payments.push({ method: prov.provider === 'paymob' ? 'Paymob' : 'Fawry', amount: Number(prov.amount), attempt: prov.name });
+    const payload = { txn_id: provTxn || newTxnId(TERMINAL, counter.current), terminal: TERMINAL, shift: shift.name,
       lines: cart.map((l) => ({ itemId: l.itemId, group: l.group, qty: l.qty, price: l.price, ...(l.hasSerial ? { serial_no: serialList(l) } : {}) })), payments };
     if (customer) payload.customer = customer.name;
     if (xr) payload.exchange_receipt = xr.name;
     if (couponCode) payload.coupon = couponCode;
     if (gift && giftCover > 0) { payload.gift_card = gift.card_no; if (Number(giftAmt) > 0) payload.gift_amount = Number(giftAmt); }
     queue.push(payload); setPending(queue.list().length);       // always queue first, so nothing is lost
-    setCart([]); setCashPaid(''); setCardPaid(''); setCardRef(''); setXr(null); setCustomer(null); setCouponCode(''); setGift(null); setGiftNo(''); setGiftAmt(''); setMsg(L('done') + (change ? ` — ${L('change')}: ${fmt(change)}` : ''));
+    setCart([]); setCashPaid(''); setCardPaid(''); setCardRef(''); setXr(null); setCustomer(null); setCouponCode(''); setGift(null); setGiftNo(''); setGiftAmt(''); setProv(null); setProvTxn(''); setMsg(L('done') + (change ? ` — ${L('change')}: ${fmt(change)}` : ''));
     await flush();
     const res = lastResult[payload.txn_id];
     if (res && res.sales_invoice) { try { setRc(await api('exchange.get_receipt', { invoice: res.sales_invoice })); } catch (e) {} }
@@ -209,6 +235,7 @@ export default function App() {
           {(perms.editInvoice === 'Y' || perms.voidInvoice === 'Y' || perms.editInvoice === 'A') && <button className={view === 'edit' ? 'on' : ''} onClick={() => setView('edit')} data-testid="tab-edit">{L('tabEdit')}</button>}
           {perms.sellGiftCard === 'Y' && <button className={view === 'gifts' ? 'on' : ''} onClick={() => setView('gifts')} data-testid="tab-gifts">{L('tabGifts')}</button>}
           {perms.coupons === 'Y' && <button className={view === 'coupons' ? 'on' : ''} onClick={() => setView('coupons')} data-testid="tab-coupons">{L('tabCoupons')}</button>}
+          {perms.viewOtherShifts === 'Y' && <button className={view === 'eta' ? 'on' : ''} onClick={() => setView('eta')} data-testid="tab-eta">{L('tabEta')}</button>}
           {perms.approve === 'Y' && perms.seeExpected === 'Y' && <button className={view === 'approvals' ? 'on' : ''} onClick={() => setView('approvals')} data-testid="tab-approvals">{L('tabApprovals')}</button>}
         </span>
         <span className="sp" />
@@ -235,6 +262,7 @@ export default function App() {
           <button className="primary" onClick={openShift} data-testid="open">{L('openShift')}</button>
           {z && <pre data-testid="z">{L('expected')}: {fmt(z.expected_cash)} / {L('countedCash')}: {fmt(z.counted_cash)} / {L('difference')}: {fmt(z.difference)}</pre>}
           {msg && <div className="msg" data-testid="close-pending-msg">{msg}</div>}
+          <Recounts L={L} fmt={fmt} />
           {perms.approve === 'Y' && perms.seeExpected === 'Y' && <Approvals L={L} fmt={fmt} />}
           {(perms.editInvoice === 'Y' || perms.voidInvoice === 'Y') && <EditInvoice L={L} fmt={fmt} perms={perms} onReceipt={setRc} hint={hint} />}
         </section>
@@ -244,7 +272,9 @@ export default function App() {
         <Gifts L={L} fmt={fmt} perms={perms} shift={shift} hint={hint} />
       ) : view === 'coupons' ? (
         <Coupons L={L} fmt={fmt} />
-      ) : view === 'approvals' ? (
+      ) : view === 'eta' ? (
+        <Eta L={L} fmt={fmt} />
+) : view === 'approvals' ? (
         <Approvals L={L} fmt={fmt} />
       ) : view === 'returns' ? (
         <Returns L={L} branch={shift.branch} onReceipt={setRc} onExchange={(name) => { setView('sale'); applyReceipt(name); }} />
@@ -293,6 +323,21 @@ export default function App() {
                   {' '}<input value={giftAmt} onChange={(e) => setGiftAmt(e.target.value)} placeholder={L('giftUseAmt')} inputMode="decimal" data-testid="gift-amt" /> <button onClick={() => { setGift(null); setGiftAmt(''); }}>{L('remove')}</button></div>
                 : <div><input value={giftNo} onChange={(e) => setGiftNo(e.target.value)} placeholder={L('giftUseNo')} data-testid="gift-no" dir="ltr" /> <button onClick={applyGift} data-testid="gift-apply">{L('giftCheck')}</button></div>}
             </div>
+            {payCfg.providers.length > 0 && (
+              <div data-testid="prov-box">
+                {!prov ? payCfg.providers.map((pr) => (
+                  <button key={pr} onClick={() => startProv(pr)} disabled={!cart.length || !(remaining > 0)} data-testid={'prov-' + pr}>{L('payWith')} {pr === 'paymob' ? 'Paymob' : 'Fawry'}</button>
+                )) : (
+                  <div className="ok-box card" data-testid="prov-attempt">
+                    <div><b>{prov.provider === 'paymob' ? 'Paymob' : 'Fawry'}</b> · {fmt(prov.amount)} · <b data-testid="prov-state">{L('provState_' + prov.state)}</b></div>
+                    {prov.instructions && <div className="muted" data-testid="prov-instructions">{prov.instructions}</div>}
+                    {prov.checkout_url && <div><a href={prov.checkout_url} target="_blank" rel="noreferrer" data-testid="prov-checkout">{L('provCheckout')}</a></div>}
+                    {prov.state === 'pending' && <span className="muted">{L('provPending')} </span>}
+                    {prov.state === 'pending' && <button onClick={checkProv} data-testid="prov-check">{L('provCheck')}</button>}
+                    {prov.state === 'pending' && payCfg.mode === 'mock' && <button onClick={settleProv} data-testid="prov-mock-paid">{L('provMockConfirm')}</button>}
+                    <button onClick={() => { setProv(null); setProvTxn(''); }} data-testid="prov-remove">{L('remove')}</button>
+                  </div>)}
+              </div>)}
             <label>{L('cash')} <input value={cashPaid} onChange={(e) => setCashPaid(e.target.value)} inputMode="decimal" data-testid="cash" /></label>
             <label>{L('card')} <input value={cardPaid} onChange={(e) => setCardPaid(e.target.value)} inputMode="decimal" data-testid="card" /></label>
             {Number(cardPaid) > 0 && <label>{L('cardRef')} <input value={cardRef} onChange={(e) => setCardRef(e.target.value)} data-testid="card-ref" /></label>}
@@ -338,14 +383,41 @@ function promoText(p, L) {
 }
 
 // Display-only fallback when the server cannot be reached; the server recomputes at submit time.
-function localQuote(cart) {
-  const lines = cart.map((l) => ({ ...l, gross: l.qty * l.price, promoDisc: 0, net: l.qty * l.price }));
-  const subtotal = lines.reduce((s, l) => s + l.net, 0);
-  return { lines, subtotal, invoice_discount: 0, net_before_tax: subtotal, local: true };
+function localQuote(cart, promos) {
+  // Same rules as the server (orbit_pos/logic/promotions.py), so the offline total matches what submit recomputes.
+  const engine = (promos || []).map((p) => p.engine).filter(Boolean);
+  const pr = applyPromotions(cart.map((l) => ({ itemId: l.itemId, group: l.group, qty: l.qty, price: l.price })), engine, new Date());
+  return { lines: pr.lines, subtotal: pr.subtotal, invoice_discount: pr.invoicePromoDisc, invoice_promo_disc: pr.invoicePromoDisc,
+           coupon_disc: 0, net_before_tax: pr2(pr.subtotal - pr.invoicePromoDisc), local: true };
 }
 
-// true when an active offer could apply to something in the cart (conservative: an unknown scope counts)
-function promoMayApply(promos, cart) {
-  return (promos || []).some((p) => p.scope_type === 'all' || p.min_total > 0 ||
-    cart.some((l) => (p.scope_type === 'item' && p.scope === l.itemId) || (p.scope_type === 'group' && p.scope === l.group)));
+
+// A close the manager sent back: the cashier counts the drawer again and saves the new count.
+function Recounts({ L, fmt }) {
+  const [rows, setRows] = useState([]); const [msg, setMsg] = useState('');
+  const [cnt, setCnt] = useState({}); const [nt, setNt] = useState({});
+  const load = async () => { try { setRows(await api('shift.my_recounts')); } catch (e) {} };
+  useEffect(() => { load(); }, []);
+  async function send(name) {
+    setMsg('');
+    try {
+      await api('shift.recount_shift', { shift: name, counted_cash: cnt[name], note: nt[name] || '' });
+      setMsg(L('recountDone')); setCnt({ ...cnt, [name]: '' }); setNt({ ...nt, [name]: '' }); load();
+    } catch (e) { setMsg(fail(e)); }
+  }
+  if (!rows.length) return null;
+  return (
+    <section className="card" data-testid="recounts">
+      <h3>{L('recountTitle')}</h3>
+      {rows.map((r) => (
+        <div key={r.name} className="ok-box card" data-testid={'recount-' + r.name}>
+          <b>{r.name}</b>
+          {r.approval_note && <p>{L('recountManagerNote')}: {r.approval_note}</p>}
+          <label>{L('countedCash')} <input value={cnt[r.name] || ''} onChange={(e) => setCnt({ ...cnt, [r.name]: e.target.value })} inputMode="decimal" data-testid="recount-count" /></label>
+          <label>{L('note')} <input value={nt[r.name] || ''} onChange={(e) => setNt({ ...nt, [r.name]: e.target.value })} data-testid="recount-note" /></label>
+          <button className="primary" onClick={() => send(r.name)} data-testid="recount-send">{L('recountSend')}</button>
+        </div>))}
+      {msg && <div className="msg" data-testid="recount-msg">{msg}</div>}
+    </section>
+  );
 }
