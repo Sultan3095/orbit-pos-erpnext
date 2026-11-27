@@ -331,7 +331,7 @@ with sync_playwright() as p:
         page.evaluate("""() => frappe.call({method: 'frappe.client.set_value',
             args: {doctype: 'User', name: frappe.session.user, fieldname: 'language', value: 'en'}})""")
         time.sleep(2)
-        go(page, "/app"); time.sleep(3)
+        go(page, "/app/orbit-pos"); time.sleep(3)
         shot(page, "desk-home-en")
         for path, name, _t in screens:
             try:
