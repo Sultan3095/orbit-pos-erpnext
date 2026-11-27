@@ -929,7 +929,7 @@ class TestFlows(Base):
             with self.assertRaises(frappe.ValidationError):                # cannot approve a sent-back close
                 shift.approve_close(sh)
             frappe.set_user("cashier@orbit.test")
-            with self.assertRaises(frappe.PermissionError):                # negative count refused
+            with self.assertRaises(frappe.ValidationError):              # negative count refused
                 shift.recount_shift(sh, -1)
             rc = shift.recount_shift(sh, 80, "recounted")                  # new count, back to Pending
             self.assertTrue(rc["pending"])

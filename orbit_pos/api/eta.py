@@ -81,7 +81,7 @@ def eta_submit(name):
     if rec.state in ("submitted", "accepted"):
         frappe.throw(frappe._("This receipt was already submitted"))
     doc = frappe.parse_json(rec.receipt_json)
-    env = settings().get("eta_environment") or "Preprod"
+    env = (settings().get("eta_environment") or "Preprod").strip().lower()
     if env != "mock":
         frappe.throw(frappe._("Live ETA submission needs the client's tax registration, a POS registered on pos.eta.gov.eg and the signing certificate. Configure those first."))
     signed = E.sign_document(doc, E.mock_signer)
