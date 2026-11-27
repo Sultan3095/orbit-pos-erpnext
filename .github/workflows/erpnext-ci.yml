@@ -60,6 +60,13 @@ jobs:
           for i in $(seq 1 60); do curl -sf localhost:8000/api/method/ping && break; sleep 3; done
           pip install playwright && playwright install --with-deps chromium
           python $GITHUB_WORKSPACE/tools/capture.py $GITHUB_WORKSPACE/out
+      - name: Two-terminal concurrency test (gift card, coupon, exchange receipt, retry)
+        run: |
+          cd ~/bench
+          for i in $(seq 1 20); do curl -sf localhost:8000/api/method/ping && break; sleep 3; done
+          bench --site test_site execute orbit_pos.tests.ci_seed.concurrency_fixtures 2>/dev/null | grep '^FIXTURES ' | sed 's/^FIXTURES //' > /tmp/fixtures.json
+          test -s /tmp/fixtures.json && cat /tmp/fixtures.json
+          python $GITHUB_WORKSPACE/tools/concurrency_test.py /tmp/fixtures.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

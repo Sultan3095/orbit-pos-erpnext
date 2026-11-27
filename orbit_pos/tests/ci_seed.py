@@ -86,3 +86,17 @@ def pending_close():
     z = shift.close_shift(sh, 110)
     frappe.db.commit()
     open("/tmp/orbit_pending.json", "w").write(json.dumps({"shift": sh, "invoice": r["sales_invoice"], "pending": z.get("pending")}))
+
+
+def concurrency_fixtures():
+    """CI helper: data for tools/concurrency_test.py (two terminals at once). Prints one FIXTURES json line."""
+    frappe.set_user("Administrator")
+    run()
+    from orbit_pos.api import gifts, sales, shift
+    sh = shift.open_shift("Orbit Demo Profile", 0)["name"]
+    card = gifts.sell_gift_card(40, sh)["card_no"]
+    gifts.save_coupon(json.dumps({"code": "RACE1", "kind": "percent", "value": 10, "max_uses": 1}))
+    walkin = frappe.db.get_value("POS Profile", "Orbit Demo Profile", "customer")
+    rec = sales._issue_receipt(walkin, 30, None, sh)
+    frappe.db.commit()
+    print("FIXTURES " + json.dumps({"shift": sh, "card": card, "coupon": "RACE1", "receipt": rec.name}))

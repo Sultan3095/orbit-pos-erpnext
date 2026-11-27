@@ -141,3 +141,166 @@ class ExchangeCredit(unittest.TestCase):
     def test_split_credit(self):
         self.assertEqual(split_credit(10, 4), (4.0, 6.0))
         self.assertEqual(split_credit(10, 15), (10.0, 0.0))
+
+
+from orbit_pos.logic.providers import (ProviderError, build_paymob_intention, parse_paymob_intention, parse_paymob_status,
+                                       build_fawry_charge, verify_fawry_signature, parse_fawry_charge, parse_fawry_status,
+                                       fawry_amount, piasters, create_attempt, mock_create)
+
+SALE = {"ref": "TXN-1", "amount": 25.0, "currency": "EGP",
+        "lines": [{"name": "Water", "qty": 5, "price": 5, "itemId": "Water"}],
+        "customer": {"name": "Mona Ali", "phone": "01000000000", "email": "m@x.eg", "id": 7}}
+PCFG = {"secret_key": "sk_test_x", "public_key": "pk_test_x", "payment_methods": [12345]}
+FCFG = {"merchant_code": "MC1", "secure_key": "sekret"}
+
+
+class Providers(unittest.TestCase):
+    def test_piasters(self):
+        self.assertEqual(piasters(25.0), 2500)
+        self.assertEqual(piasters("0.01"), 1)
+
+    def test_paymob_body(self):
+        b = build_paymob_intention(SALE, PCFG)
+        self.assertEqual(b["amount"], 2500)
+        self.assertEqual(b["currency"], "EGP")
+        self.assertEqual(b["payment_methods"], [12345])
+        self.assertEqual(b["special_reference"], "TXN-1")
+        self.assertEqual(b["items"][0]["amount"], 2500)
+        self.assertEqual(b["billing_data"]["first_name"], "Mona")
+
+    def test_paymob_needs_key_and_methods(self):
+        with self.assertRaises(ProviderError):
+            build_paymob_intention(SALE, {"payment_methods": [1]})
+        with self.assertRaises(ProviderError):
+            build_paymob_intention(SALE, {"secret_key": "x"})
+
+    def test_paymob_parse_and_checkout_url(self):
+        a = parse_paymob_intention({"id": 99, "client_secret": "cs1"}, PCFG)
+        self.assertEqual(a["state"], "pending")
+        self.assertEqual(a["ref"], "99")
+        self.assertIn("publicKey=pk_test_x", a["checkout_url"])
+        self.assertIn("clientSecret=cs1", a["checkout_url"])
+
+    def test_paymob_status_map(self):
+        self.assertEqual(parse_paymob_status({"success": True, "pending": False}), "paid")
+        self.assertEqual(parse_paymob_status({"success": False, "pending": True}), "pending")
+        self.assertEqual(parse_paymob_status({"success": False, "pending": False}), "failed")
+        self.assertEqual(parse_paymob_status({"success": True, "pending": False, "is_refund": True}), "refunded")
+
+    def test_fawry_body_and_signature(self):
+        b = build_fawry_charge(SALE, FCFG)
+        self.assertEqual(b["merchantCode"], "MC1")
+        self.assertEqual(b["merchantRefNum"], "TXN-1")
+        self.assertEqual(b["paymentMethod"], "PAYATFAWRY")
+        self.assertEqual(b["amount"], "25.00")
+        self.assertEqual(b["chargeItems"][0]["quantity"], 5)
+        self.assertTrue(verify_fawry_signature(b, FCFG))
+        b2 = dict(b, amount="26.00")
+        self.assertFalse(verify_fawry_signature(b2, FCFG))
+
+    def test_fawry_parse(self):
+        a = parse_fawry_charge({"statusCode": 200, "referenceNumber": "R1"})
+        self.assertEqual(a["state"], "pending")
+        self.assertIn("R1", a["instructions"])
+        with self.assertRaises(ProviderError):
+            parse_fawry_charge({"statusCode": 400, "statusDescription": "bad"})
+
+    def test_fawry_status_map(self):
+        self.assertEqual(parse_fawry_status({"paymentStatus": "PAID"}), "paid")
+        self.assertEqual(parse_fawry_status({"paymentStatus": "UNPAID"}), "pending")
+        self.assertEqual(parse_fawry_status({"paymentStatus": "EXPIRED"}), "expired")
+        self.assertEqual(parse_fawry_status({"paymentStatus": "REFUNDED"}), "refunded")
+
+    def test_create_attempt_urls(self):
+        r = create_attempt("paymob", SALE, PCFG)
+        self.assertEqual(r["url"], "https://accept.paymob.com/v1/intention/")
+        self.assertEqual(r["headers"]["Authorization"], "Token sk_test_x")
+        r2 = create_attempt("fawry", SALE, FCFG, mode="test")
+        self.assertIn("fawrystaging", r2["url"])
+        r3 = create_attempt("fawry", SALE, FCFG, mode="live")
+        self.assertIn("atfawry.com/ECommerceWeb", r3["url"])
+
+    def test_mock_create(self):
+        a = mock_create("paymob", build_paymob_intention(SALE, PCFG))
+        self.assertEqual(a["state"], "pending")
+        self.assertIn("publicKey=pk_mock", a["checkout_url"])
+        a2 = mock_create("fawry", build_fawry_charge(SALE, FCFG))
+        self.assertEqual(a2["state"], "pending")
+        self.assertTrue(a2["ref"].startswith("FAWRY-"))
+        with self.assertRaises(ProviderError):
+            mock_create("aman", {})
+
+    def test_fawry_amount(self):
+        self.assertEqual(fawry_amount(25), "25.00")
+        self.assertEqual(fawry_amount(0.1), "0.10")
+
+
+from orbit_pos.logic.eta import (EtaError, build_receipt_document, build_item, compute_uuid, validate_receipt,
+                                 sign_document, mock_signer, mock_submission, serialize_for_hash)
+
+SELLER = {"id": "113317713", "name": "Orbit Demo Store", "activityCode": "4751",
+          "address": {"branchID": "1", "country": "EG", "governate": "Cairo", "regionCity": "Nasr City",
+                      "street": "10 Abbas El Akkad", "buildingNumber": "10"}}
+INV = {"number": "POS-0001", "datetime_issued": "2026-11-27T10:00:00Z", "currency": "EGP",
+       "lines": [{"itemId": "6223", "name": "Water", "qty": 5, "price": 5},
+                 {"itemId": "6221", "name": "Chips", "qty": 2, "price": 4, "discount": 1}],
+       "payments": [{"method": "Cash", "amount": 32}],
+       "customer": {"name": "Mona Ali", "type": "P"}}
+
+
+class Eta(unittest.TestCase):
+    def test_document_shape(self):
+        doc = build_receipt_document(INV, SELLER)
+        self.assertEqual(doc["documentType"]["receiptType"], "s")
+        self.assertEqual(doc["documentType"]["typeVersion"], "1.2")
+        self.assertEqual(doc["header"]["receiptNumber"], "POS-0001")
+        self.assertEqual(doc["totalSale"], 33.0)
+        self.assertEqual(doc["netAmount"], 32.0)
+        self.assertEqual(doc["paymentMethod"], "C")
+        self.assertEqual(len(doc["header"]["uuid"]), 64)
+        self.assertEqual(doc["itemData"][1]["itemsDiscount"], 1.0)
+        self.assertEqual(doc["itemData"][1]["netTotal"], 7.0)
+
+    def test_return_receipt(self):
+        doc = build_receipt_document(dict(INV, is_return=True), SELLER)
+        self.assertEqual(doc["documentType"]["receiptType"], "r")
+        self.assertEqual(doc["documentType"]["receiptTypeBase"], "RR")
+
+    def test_uuid_matches_content_and_ignores_uuid_field(self):
+        doc = build_receipt_document(INV, SELLER)
+        self.assertEqual(compute_uuid(doc), doc["header"]["uuid"])
+        doc["header"]["receiptNumber"] = "POS-0002"
+        self.assertNotEqual(compute_uuid(doc), doc["header"]["uuid"])   # tamper detected
+
+    def test_validation_catches_missing(self):
+        doc = build_receipt_document(INV, SELLER)
+        self.assertEqual(validate_receipt(doc), [])
+        bad = build_receipt_document(INV, SELLER)
+        bad["seller"]["address"]["country"] = "US"
+        self.assertTrue(any("country must be EG" in e for e in validate_receipt(bad)))
+        with self.assertRaises(EtaError):
+            build_receipt_document(dict(INV, lines=[]), SELLER)
+        with self.assertRaises(EtaError):
+            build_receipt_document(dict(INV, number=""), SELLER)
+
+    def test_mixed_tender_payment_method(self):
+        doc = build_receipt_document(dict(INV, payments=[{"method": "Cash"}, {"method": "Gift Card"}]), SELLER)
+        self.assertEqual(doc["paymentMethod"], "C+GC")
+
+    def test_mock_submission_accept_and_reject(self):
+        good = sign_document(build_receipt_document(INV, SELLER), mock_signer)
+        baddoc = build_receipt_document(INV, SELLER)
+        baddoc["header"]["receiptNumber"] = ""                       # invalid: no number (and uuid now stale)
+        bad = sign_document(baddoc, mock_signer)
+        r = mock_submission([good, bad])
+        self.assertEqual(len(r["submissionUUID"]), 64)
+        self.assertEqual(len(r["acceptedDocuments"]), 1)
+        self.assertEqual(len(r["rejectedDocuments"]), 1)
+        self.assertIn("receiptNumber", r["rejectedDocuments"][0]["error"]["message"])
+        self.assertTrue(r["acceptedDocuments"][0]["longId"].startswith("MOCK"))
+
+    def test_serialization_skips_empty_and_uuid(self):
+        s = serialize_for_hash({"a": "x", "uuid": "IGNORED", "b": "", "c": ["y"]})
+        self.assertNotIn("IGNORED", s)
+        self.assertIn('"X"', s)
+        self.assertIn('"Y"', s)
