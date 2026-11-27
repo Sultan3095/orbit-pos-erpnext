@@ -908,7 +908,7 @@ class TestFlows(Base):
         r3 = sales.submit_sale(self._payload(sh, line, 5, customer="Loyal Mona", redeem_points=5,
                                            manager="boss@orbit.test", pin="4321"))         # manager override, no phone
         self.assertEqual(r3["status"], "created")
-        self.assertTrue(frappe.db.exists("POS Manager Approval", {"action": "loyalty-redeem-phone-override",
+        self.assertTrue(frappe.db.exists("POS Manager Approval", {"action": "Loyalty Phone Override",
                                                                   "requested_by": "cashier@orbit.test"}))
 
     def test_55_recount_send_back_and_second_approval(self):

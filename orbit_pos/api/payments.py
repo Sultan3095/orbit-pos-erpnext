@@ -155,12 +155,12 @@ def validate_provider_payment(pay, payload_ref, company):
     # row lock: one sale consumes the attempt
     frappe.db.sql("select name from `tabPOS Payment Attempt` where name=%s for update", ref)
     att = frappe.get_doc("POS Payment Attempt", ref)
-    if att.state != "paid":
-        frappe.throw(frappe._("This {0} payment is {1}, not paid").format(pay["method"], att.state))
-    if att.txn_id != payload_ref:
-        frappe.throw(frappe._("This payment attempt belongs to another transaction"))
     if att.sales_invoice:
         frappe.throw(frappe._("This payment was already used on invoice {0}").format(att.sales_invoice), frappe.DuplicateEntryError)
+    if att.txn_id != payload_ref:
+        frappe.throw(frappe._("This payment attempt belongs to another transaction"))
+    if att.state != "paid":
+        frappe.throw(frappe._("This {0} payment is {1}, not paid").format(pay["method"], att.state))
     if abs(flt(att.amount) - flt(pay["amount"])) > 0.005:
         frappe.throw(frappe._("The paid amount {0} does not match the payment {1}").format(att.amount, pay["amount"]))
     ensure_provider_mode(company, provider)

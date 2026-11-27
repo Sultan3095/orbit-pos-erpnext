@@ -216,7 +216,7 @@ def _submit_sale(payload):
         if pts and not _loyalty_phone_ok(customer, p.get("loyalty_phone")):
             # approved: redemption needs the customer's registered phone, or a manager override
             who = approver_for("approve", p.get("manager"), p.get("pin"))
-            log_approval(who, "loyalty-redeem-phone-override", customer, "{0} points".format(pts), shift)
+            log_approval(who, "Loyalty Phone Override", customer, "{0} points".format(pts), shift)
     cdoc = gifts.check_coupon(p["coupon"], customer, walkin, lock=True) if p.get("coupon") else None
     calc = _compute(p["lines"], pts, p.get("inv_pct", 0), p.get("inv_amt", 0), gifts.to_engine(cdoc) if cdoc else None)
     if cdoc and not calc["coupon_disc"] > 0:

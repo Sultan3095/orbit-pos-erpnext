@@ -31,7 +31,7 @@
    "fieldname": "action",
    "fieldtype": "Select",
    "label": "Action",
-   "options": "Discount\nReturn After Window\nCash Out\nPrice Override\nVoid\nClose Approval\nReopen Shift\nEdit Invoice\nVoid Invoice\nVoid Gift Card\nWrite Off Gift Card"
+   "options": "Discount\nReturn After Window\nCash Out\nPrice Override\nVoid\nClose Approval\nReopen Shift\nEdit Invoice\nVoid Invoice\nVoid Gift Card\nWrite Off Gift Card\nClose Second Approval\nClose Recount Request\nLoyalty Phone Override"
   },
   {
    "fieldname": "reference",
