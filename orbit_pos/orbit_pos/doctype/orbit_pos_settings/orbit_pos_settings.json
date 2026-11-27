@@ -35,6 +35,13 @@
    "description": "A cashier cash-out above this amount needs a manager PIN"
   },
   {
+   "fieldname": "second_approval_above",
+   "fieldtype": "Currency",
+   "label": "Second Manager Approval Above (0 = off)",
+   "default": "0",
+   "description": "A blind close whose cash difference is larger than this needs a second manager's approval."
+  },
+  {
    "fieldname": "currency_per_point",
    "fieldtype": "Currency",
    "label": "Currency Per Point",
@@ -90,8 +97,8 @@
    "fieldname": "eta_environment",
    "fieldtype": "Select",
    "label": "Eta Environment",
-   "options": "Preprod\nProd",
-   "default": "Preprod"
+   "options": "Mock\nPreprod\nProd",
+   "default": "Mock"
   },
   {
    "fieldname": "eta_note",
@@ -99,6 +106,51 @@
    "label": "Eta Note",
    "read_only": 1,
    "default": "ETA credentials are never stored here in plain text. Use a vault/secret."
+  },
+  {
+   "fieldname": "eta_seller_section",
+   "fieldtype": "Section Break",
+   "label": "ETA Seller"
+  },
+  {
+   "fieldname": "eta_seller_id",
+   "fieldtype": "Data",
+   "label": "Seller Tax Registration Number"
+  },
+  {
+   "fieldname": "eta_seller_name",
+   "fieldtype": "Data",
+   "label": "Seller Name"
+  },
+  {
+   "fieldname": "eta_activity_code",
+   "fieldtype": "Data",
+   "label": "Activity Code"
+  },
+  {
+   "fieldname": "eta_branch_id",
+   "fieldtype": "Data",
+   "label": "Branch ID"
+  },
+  {
+   "fieldname": "eta_governate",
+   "fieldtype": "Data",
+   "label": "Governate"
+  },
+  {
+   "fieldname": "eta_region_city",
+   "fieldtype": "Data",
+   "label": "Region / City"
+  },
+  {
+   "fieldname": "eta_street",
+   "fieldtype": "Data",
+   "label": "Street"
+  },
+  {
+   "fieldname": "eta_building",
+   "fieldtype": "Data",
+   "label": "Building Number"
   },
   {
    "fieldname": "terms_section",
@@ -171,6 +223,44 @@
    "fieldname": "gift_terms_en",
    "fieldtype": "Small Text",
    "label": "Card terms (English)"
+  },
+  {
+   "fieldname": "payments_section",
+   "fieldtype": "Section Break",
+   "label": "Payments (Paymob / Fawry)"
+  },
+  {
+   "fieldname": "payments_mode",
+   "fieldtype": "Select",
+   "label": "Payments Mode",
+   "options": "off\nmock\ntest\nlive",
+   "default": "off",
+   "description": "off: provider tenders hidden. mock: our simulation built from the docs. test/live: the provider's own environment."
+  },
+  {
+   "fieldname": "paymob_public_key",
+   "fieldtype": "Data",
+   "label": "Paymob Public Key"
+  },
+  {
+   "fieldname": "paymob_secret_key",
+   "fieldtype": "Password",
+   "label": "Paymob Secret Key"
+  },
+  {
+   "fieldname": "paymob_integration_ids",
+   "fieldtype": "Data",
+   "label": "Paymob Integration IDs (comma separated)"
+  },
+  {
+   "fieldname": "fawry_merchant_code",
+   "fieldtype": "Data",
+   "label": "Fawry Merchant Code"
+  },
+  {
+   "fieldname": "fawry_secure_key",
+   "fieldtype": "Password",
+   "label": "Fawry Secure Key"
   }
  ],
  "permissions": [

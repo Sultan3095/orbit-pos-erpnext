@@ -6,7 +6,7 @@ from orbit_pos.logic.promotions import apply_promotions, r2
 from orbit_pos.logic.returns import return_allowed, refund_amount, cross_branch_allowed, credit_expiry, credit_expired, split_credit
 from orbit_pos.logic.loyalty import points_earned, redeem_value
 from orbit_pos.logic.barcodes import make_ean13, parse_scale_barcode
-from . import gifts
+from . import gifts, payments as provider_payments
 from .common import require_pos_user, verify_manager_pin, log_approval, settings, perm, can, approver_for, require
 
 
@@ -213,6 +213,10 @@ def _submit_sale(payload):
             frappe.throw(frappe._("Choose a named customer to use loyalty points"))
         frappe.db.sql("select name from `tabCustomer` where name=%s for update", customer)
         pts = min(int(p["redeem_points"]), _balance(customer, lock=True))
+        if pts and not _loyalty_phone_ok(customer, p.get("loyalty_phone")):
+            # approved: redemption needs the customer's registered phone, or a manager override
+            who = approver_for("approve", p.get("manager"), p.get("pin"))
+            log_approval(who, "loyalty-redeem-phone-override", customer, "{0} points".format(pts), shift)
     cdoc = gifts.check_coupon(p["coupon"], customer, walkin, lock=True) if p.get("coupon") else None
     calc = _compute(p["lines"], pts, p.get("inv_pct", 0), p.get("inv_amt", 0), gifts.to_engine(cdoc) if cdoc else None)
     if cdoc and not calc["coupon_disc"] > 0:
@@ -275,6 +279,7 @@ def _submit_sale(payload):
             si.orbit_gift_card = gc.name
             si.orbit_gift_amount = gift_used
     allowed = {r.mode_of_payment for r in prof.payments}
+    used_attempts = []
     for pay in p.get("payments", []):
         if pay["method"] in (gifts.GIFT_MODE, CREDIT_MODE):
             frappe.throw(frappe._("Use the gift card field or the exchange receipt field for this"))
@@ -282,10 +287,13 @@ def _submit_sale(payload):
             frappe.throw(frappe._("A payment amount cannot be negative"))
         if not flt(pay.get("amount")) > 0:
             continue    # an empty row (for example 0 cash when a gift card or exchange receipt covers it)
-        if pay["method"] not in allowed:
+        if pay["method"] in provider_payments.METHOD_PROVIDERS:
+            att = provider_payments.validate_provider_payment(pay, txn_id, prof.company)
+            used_attempts.append(att)
+        elif pay["method"] not in allowed:
             frappe.throw(frappe._("Payment method {0} is not on this POS Profile").format(pay["method"]))
         si.append("payments", {"mode_of_payment": pay["method"], "amount": flt(pay["amount"]),
-                               "orbit_ref": (pay.get("ref") or "")[:60]})
+                               "orbit_ref": (pay.get("ref") or pay.get("attempt") or "")[:60]})
         paid += flt(pay["amount"])
     if paid + 0.005 < si.grand_total:
         frappe.throw(frappe._("Payments {0} are less than total {1}").format(paid, si.grand_total))
@@ -304,6 +312,8 @@ def _submit_sale(payload):
     si.insert()
     si.submit()
 
+    for att in used_attempts:
+        att.db_set("sales_invoice", si.name)
     if gift_used > 0:
         gifts.redeem(si.orbit_gift_card, gift_used, si.name)
     new_receipt = None
@@ -319,10 +329,34 @@ def _submit_sale(payload):
             _ledger(customer, -pts, si.name, "redeem")
     frappe.get_doc({"doctype": "Offline Transaction", "txn_id": txn_id, "terminal": p.get("terminal"), "shift": shift,
                     "payload_hash": body_hash, "status": "Created", "sales_invoice": si.name}).insert(ignore_permissions=True)
+    from . import eta
+    eta.maybe_queue_receipt(si.name)
     return {"status": "created", "sales_invoice": si.name, "grand_total": si.grand_total, "change": change,
             "exchange_credit_used": credit_used, "new_exchange_receipt": new_receipt,
             "coupon_amount": calc["coupon_disc"] if cdoc else 0, "gift_used": gift_used,
             "gift_balance": flt(frappe.db.get_value("POS Gift Card", si.orbit_gift_card, "balance")) if gift_used > 0 else None}
+
+
+def _customer_phones(customer):
+    """Every registered phone of a customer: mobile/phone fields that exist on this version, plus the
+    primary contact's numbers."""
+    nums = []
+    meta = frappe.get_meta("Customer")
+    fields = [f for f in ("mobile_no", "phone", "mobile_number") if meta.has_field(f)]
+    if fields:
+        row = frappe.db.get_value("Customer", customer, fields, as_dict=True) or {}
+        nums += [row.get(f) for f in fields]
+    contact = frappe.db.get_value("Dynamic Link", {"link_doctype": "Customer", "link_name": customer,
+                                                   "parenttype": "Contact"}, "parent")
+    if contact:
+        c = frappe.db.get_value("Contact", contact, ["mobile_no", "phone"], as_dict=True) or {}
+        nums += [c.get("mobile_no"), c.get("phone")]
+    return nums
+
+
+def _loyalty_phone_ok(customer, entered):
+    from orbit_pos.logic.loyalty import phone_matches
+    return phone_matches(_customer_phones(customer), entered)
 
 
 def _balance(customer, lock=False):

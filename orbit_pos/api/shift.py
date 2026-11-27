@@ -136,7 +136,7 @@ def pending_close_view(shift, manager=None, pin=None):
 
 
 @frappe.whitelist()
-def approve_close(shift, note=None, manager=None, pin=None):
+def approve_close(shift, note=None, manager=None, pin=None, second_manager=None, second_pin=None):
     require_pos_user()
     doc = frappe.get_doc("POS Shift", shift)
     if doc.approval_status != "Pending":
@@ -145,14 +145,62 @@ def approve_close(shift, note=None, manager=None, pin=None):
     diff = round(flt(doc.counted_cash) - flt(doc.sealed_expected), 2)
     if abs(diff) > 0.009 and not (note or "").strip() and not doc.notes:
         frappe.throw(frappe._("There is a difference. Write a note."))
+    second = None
+    threshold = flt(settings().get("second_approval_above"))
+    if threshold > 0 and abs(diff) > threshold:
+        # approved: a difference this large needs a second manager, never the first approver or the cashier
+        second = verify_manager_pin(second_manager, second_pin)
+        if not (can("approve", second) and can("seeExpected", second)):
+            frappe.throw(frappe._("{0} may not approve a shift close").format(second), frappe.PermissionError)
+        if second in (who, doc.user):
+            frappe.throw(frappe._("The second approver must be a different manager"), frappe.PermissionError)
     doc.expected_cash = doc.sealed_expected
     doc.approval_status = "Approved"
     doc.approved_by = who
+    doc.second_approved_by = second
     doc.approved_at = now_datetime()
     doc.approval_note = (note or "").strip()
     doc.save()
     log_approval(who, "Close Approval", shift, f"expected {doc.expected_cash} counted {doc.counted_cash} diff {diff}", shift)
+    if second:
+        log_approval(second, "Close Second Approval", shift, f"diff {diff} over threshold {threshold}", shift)
     return _z_report(shift)
+
+
+@frappe.whitelist()
+def send_back_for_recount(shift, note=None, manager=None, pin=None):
+    """The approver disagrees with the count: back to the cashier for a recount, with a note. Approved flow."""
+    require_pos_user()
+    doc = frappe.get_doc("POS Shift", shift)
+    if doc.approval_status != "Pending":
+        frappe.throw(frappe._("This close is not waiting for approval"))
+    who = _approver_for_close(doc, manager, pin)
+    if not (note or "").strip():
+        frappe.throw(frappe._("Write what is wrong with the count"))
+    doc.approval_status = "Recount"
+    doc.approval_note = (note or "").strip()
+    doc.save()
+    log_approval(who, "Close Recount Request", shift, (note or "").strip(), shift)
+    return {"shift": shift, "approval_status": "Recount"}
+
+
+@frappe.whitelist()
+def recount_shift(shift, counted_cash, note=None):
+    """The cashier recounts after a send-back: same close, new count, back to Pending for approval."""
+    require_pos_user()
+    doc = frappe.get_doc("POS Shift", shift)
+    if doc.approval_status != "Recount":
+        frappe.throw(frappe._("This close was not sent back for a recount"))
+    if doc.user != frappe.session.user:
+        frappe.throw(frappe._("Only the shift owner recounts"), frappe.PermissionError)
+    if flt(counted_cash) < 0:
+        frappe.throw(frappe._("Counted cash cannot be negative"))
+    doc.counted_cash = flt(counted_cash)
+    if (note or "").strip():
+        doc.notes = ((doc.notes or "") + "\n" + note.strip()).strip()
+    doc.approval_status = "Pending"
+    doc.save()
+    return {"shift": shift, "pending": True, "counted_cash": doc.counted_cash}
 
 
 @frappe.whitelist()
@@ -185,7 +233,7 @@ def reopen_shift(shift, reason, manager=None, pin=None):
 
 def _z_report(shift):
     doc = frappe.get_doc("POS Shift", shift)
-    pending = doc.approval_status == "Pending"
+    pending = doc.approval_status in ("Pending", "Recount")   # sent-back counts stay hidden from the cashier too
     sales = frappe.db.sql("""select count(*), coalesce(sum(grand_total),0) from `tabSales Invoice`
         where orbit_shift=%s and docstatus=1 and is_return=0""", shift)[0]
     rets = frappe.db.sql("""select count(*), coalesce(sum(grand_total),0) from `tabSales Invoice`

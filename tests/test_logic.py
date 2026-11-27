@@ -304,3 +304,21 @@ class Eta(unittest.TestCase):
         self.assertNotIn("IGNORED", s)
         self.assertIn('"X"', s)
         self.assertIn('"Y"', s)
+
+
+from orbit_pos.logic.loyalty import phone_digits, phone_matches
+
+
+class LoyaltyPhone(unittest.TestCase):
+    def test_digits(self):
+        self.assertEqual(phone_digits("+20 105 551 234"), "20105551234")
+        self.assertEqual(phone_digits(None), "")
+
+    def test_match_exact_and_country_code_suffix(self):
+        self.assertTrue(phone_matches(["0105551234"], "0105551234"))
+        self.assertTrue(phone_matches(["+20105551234"], "0105551234"))
+        self.assertTrue(phone_matches(["0105551234"], "+20 105 551 234"))
+        self.assertFalse(phone_matches(["0105551234"], "0109999999"))
+        self.assertFalse(phone_matches(["0105551234"], "123"))        # too short
+        self.assertFalse(phone_matches([], "0105551234"))
+        self.assertFalse(phone_matches(None, "0105551234"))
