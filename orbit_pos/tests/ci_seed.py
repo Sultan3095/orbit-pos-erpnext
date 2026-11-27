@@ -57,14 +57,16 @@ def run():
     st.receipt_terms_en = "Exchange within the stated period, item in original condition, invoice required."
     st.save()
     from orbit_pos.api import sales, shift
-    # an earlier closed shift with sales, a return, a cash movement and a manager approval, so lists are not empty
-    sh = shift.open_shift(name, 100)["name"]
-    pay = lambda t, lines, amt, **kw: json.dumps({"txn_id": t, "shift": sh, "lines": lines, "payments": [{"method": "Cash", "amount": amt}], **kw})
-    r1 = sales.submit_sale(pay("DEMO-1", [{"itemId": "Chips", "qty": 5, "price": 4}, {"itemId": "Juice", "qty": 2, "price": 12}], 50))
-    sales.submit_sale(pay("DEMO-2", [{"itemId": "Water", "qty": 3, "price": 5}], 20))
-    sales.create_return(r1["sales_invoice"], json.dumps([{"item_code": "Juice", "qty": 1}]))
-    shift.cash_movement(sh, "Out", 10, "tea and cleaning supplies")
-    shift.close_shift(sh, 120)
+    # an earlier closed shift with sales, a return, a cash movement and a manager approval, so lists are not empty.
+    # Idempotent: the workflow seeds once for screenshots and again inside concurrency_fixtures.
+    if not frappe.db.exists("Sales Invoice", {"orbit_txn_id": "DEMO-1"}):
+        sh = shift.open_shift(name, 100)["name"]
+        pay = lambda t, lines, amt, **kw: json.dumps({"txn_id": t, "shift": sh, "lines": lines, "payments": [{"method": "Cash", "amount": amt}], **kw})
+        r1 = sales.submit_sale(pay("DEMO-1", [{"itemId": "Chips", "qty": 5, "price": 4}, {"itemId": "Juice", "qty": 2, "price": 12}], 50))
+        sales.submit_sale(pay("DEMO-2", [{"itemId": "Water", "qty": 3, "price": 5}], 20))
+        sales.create_return(r1["sales_invoice"], json.dumps([{"item_code": "Juice", "qty": 1}]))
+        shift.cash_movement(sh, "Out", 10, "tea and cleaning supplies")
+        shift.close_shift(sh, 120)
     frappe.db.commit()
     print("seed done", frappe.get_all("Sales Invoice", pluck="name"))
 
