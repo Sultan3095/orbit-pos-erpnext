@@ -165,3 +165,11 @@ def validate_provider_payment(pay, payload_ref, company):
         frappe.throw(frappe._("The paid amount {0} does not match the payment {1}").format(att.amount, pay["amount"]))
     ensure_provider_mode(company, provider)
     return att
+
+
+@frappe.whitelist()
+def config():
+    """What the payment screen needs: mode and which providers the cashier can tender with."""
+    require_pos_user()
+    mode = payments_mode()
+    return {"mode": mode, "providers": list(P.PROVIDERS) if mode != "off" else []}

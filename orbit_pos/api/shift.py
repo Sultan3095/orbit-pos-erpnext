@@ -131,8 +131,11 @@ def pending_close_view(shift, manager=None, pin=None):
     if doc.approval_status != "Pending":
         frappe.throw(frappe._("This close is not waiting for approval"))
     _approver_for_close(doc, manager, pin)
+    diff = round(flt(doc.counted_cash) - flt(doc.sealed_expected), 2)
+    threshold = flt(settings().get("second_approval_above"))
     return {"shift": shift, "user": doc.user, "expected_cash": flt(doc.sealed_expected), "counted_cash": flt(doc.counted_cash),
-            "difference": round(flt(doc.counted_cash) - flt(doc.sealed_expected), 2), "note": doc.notes or ""}
+            "difference": diff, "note": doc.notes or "", "needs_second": bool(threshold > 0 and abs(diff) > threshold),
+            "second_threshold": threshold}
 
 
 @frappe.whitelist()
@@ -294,3 +297,11 @@ def pending_closes():
         frappe.throw(frappe._("Not permitted"), frappe.PermissionError)
     return frappe.get_all("POS Shift", filters={"approval_status": "Pending", "status": "Closed"},
                           fields=["name", "user", "closed_at", "pos_profile"], order_by="closed_at desc")
+
+
+@frappe.whitelist()
+def my_recounts():
+    """Closes of mine that a manager sent back for a recount, with the manager's note."""
+    require_pos_user()
+    return frappe.get_all("POS Shift", filters={"user": frappe.session.user, "approval_status": "Recount"},
+                          fields=["name", "approval_note", "closed_at"], order_by="closed_at desc")
