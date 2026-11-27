@@ -39,7 +39,7 @@ def run():
             u = frappe.get_doc("User", role_user); u.orbit_pos_pin = pin; u.save()
     if not frappe.db.exists("POS Promotion", {"promo_name": "Buy 2 get 3 Chips"}):
         frappe.get_doc({"doctype": "POS Promotion", "promo_name": "Buy 2 get 3 Chips", "promo_type": "bxgy", "buy_qty": 2,
-                        "get_qty": 3, "enabled": 1}).insert()
+                        "get_qty": 3, "scope_type": "Item", "scope_item": "Chips", "enabled": 1}).insert()
     tf.enable_serial()
     if not frappe.db.exists("Item", "Phone"):
         frappe.get_doc({"doctype": "Item", "item_code": "Phone", "item_name": "Phone", "item_group": leaf("Item Group"),
