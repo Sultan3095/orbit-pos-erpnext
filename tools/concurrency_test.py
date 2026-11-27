@@ -86,8 +86,12 @@ def main():
     won, _ = race("gift card", [sale("RACE-GC-%d" % i, sh, water(5), gift_card=fx["card"], gift_amount=25)
                                 for i in range(8)])
     expect(len(won) == 1, "gift card: exactly one of 8 parallel 25-pound redemptions won")
-    s, card = call("orbit_pos.api.gifts.check_gift_card", card_no=fx["card"])
+    if won:
+        print("   winner message:", json.dumps(won[0])[:400])
+    s, card = call("orbit_pos.api.gifts.gift_card_history", card_no=fx["card"])
     bal = card.get("balance") if s and isinstance(card, dict) else None
+    if not (s and bal is not None and abs(bal - 15) < 0.01):
+        print("   card history:", json.dumps(card)[:600])
     expect(s and bal is not None and abs(bal - 15) < 0.01,
            "gift card: balance 15 after the race (got %s)" % bal)
 
