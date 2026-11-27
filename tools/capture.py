@@ -325,7 +325,25 @@ with sync_playwright() as p:
         shot(page, "invoice-form", "فاتورة كاشير: مرتبطة بالشيفت والـ transaction id", 1500)
     except Exception as e:
         log.append(("invoice-form", "FAIL " + str(e)[:80]))
-        ctx.close(); b.close()
+
+    # ---- the same desk screens in English (the EN guide uses these; no captions)
+    try:
+        page.evaluate("""() => frappe.call({method: 'frappe.client.set_value',
+            args: {doctype: 'User', name: frappe.session.user, fieldname: 'language', value: 'en'}})""")
+        time.sleep(2)
+        go(page, "/app"); time.sleep(3)
+        shot(page, "desk-home-en")
+        for path, name, _t in screens:
+            try:
+                go(page, path); shot(page, name + "-en", None, 1500)
+            except Exception as e:
+                log.append((name + "-en", "FAIL " + str(e)[:80]))
+        page.evaluate("""() => frappe.call({method: 'frappe.client.set_value',
+            args: {doctype: 'User', name: frappe.session.user, fieldname: 'language', value: 'ar'}})""")
+        time.sleep(1)
+    except Exception as e:
+        log.append(("desk-en", "FAIL " + str(e)[:200]))
+    ctx.close(); b.close()
 json.dump(log, open(OUT + "/capture-log.json", "w"), indent=1)
 print(json.dumps(log, indent=1))
 bad = [x for x in log if (len(x) == 2 and str(x[1]).startswith("FAIL")) or x[0] == "api"]
