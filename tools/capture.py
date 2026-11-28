@@ -332,6 +332,11 @@ with sync_playwright() as p:
             args: {doctype: 'User', name: frappe.session.user, fieldname: 'language', value: 'en'}})""")
         time.sleep(2)
         go(page, "/app/orbit-pos"); time.sleep(3)
+        try:
+            fr = page.frame_locator("iframe")
+            fr.get_by_test_id("lang").select_option("en"); time.sleep(1.5)
+        except Exception:
+            pass
         shot(page, "desk-home-en")
         for path, name, _t in screens:
             try:
